@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.1.0';
+const VERSIONE = '1.2.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -173,13 +173,35 @@ function render() {
 window.addEventListener('hashchange', (e) => { const da = (e.oldURL.split('#')[1] || 'oggi'); if (VISTE[da.split('/')[0]]) ST.indietro = '#' + da; if (!/^#(p|z)\//.test(location.hash)) chiudiFoglio(); render(); });
 
 /* ---------- vista: oggi ---------- */
+/* anteprima della heat map: griglia di pallini come nelle slide, anello blu sul punto più vicino alla sede */
+const COL_RANK = (r) => (!r ? '#C5221F' : r === 1 ? '#1E8E3E' : r === 2 ? '#34A853' : r === 3 ? '#6CC24A' : r <= 6 ? '#F6C026' : r <= 10 ? '#F29529' : '#E8603C');
+const _righe = new WeakMap();
+function righeGriglia(z) {
+  if (_righe.has(z.punti)) return _righe.get(z.punti);
+  const n = z.meta.griglia || Math.round(Math.sqrt(z.punti.length));
+  const idx = z.punti.map((pt, i) => i).sort((a, b) => (z.punti[b][0] - z.punti[a][0]) || (z.punti[a][1] - z.punti[b][1]));
+  const rows = []; for (let i = 0; i < idx.length; i += n) rows.push(idx.slice(i, i + n).sort((a, b) => z.punti[a][1] - z.punti[b][1]));
+  _righe.set(z.punti, rows); return rows;
+}
+function miniMappa(z, p, px = 54) {
+  if (!p.pid || !z.punti || !z.attivita[p.pid]) return `<span class="mini vuota" style="width:${px}px;height:${px}px" title="Non presente nella scansione"></span>`;
+  const rows = righeGriglia(z); const n = rows.length; const c = px / n; const r = c * 0.42;
+  const ranks = L.metriche(z, p.pid).ranks; const vic = L.puntiOrdinati(z, p)[0].i;
+  let dots = '';
+  rows.forEach((row, y) => row.forEach((i, x) => {
+    const cx = (x + .5) * c, cy = (y + .5) * c;
+    dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${COL_RANK(ranks[i])}"/>`;
+    if (i === vic) dots += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(r + 1.3).toFixed(1)}" fill="none" stroke="#1A73E8" stroke-width="1.4"/>`;
+  }));
+  return `<svg class="mini" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" role="img" aria-label="Mappa di visibilità">${dots}</svg>`;
+}
 function cardProspect({ zid, z, p }, extra = '') {
   const g = urgenza(p);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
-  return `<a class="card ${classeCard(p)}" href="#p/${zid}/${p.id}">
+  return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">
     <div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${esc(p.priorita || '—')}</span></div>
-    ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}${extra}</a>`;
+    ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}${extra}</div></a>`;
 }
 function vOggi() {
   const tt = tutti(); const ap = tt.filter((x) => aperto(x.p));
