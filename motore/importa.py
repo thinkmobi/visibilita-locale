@@ -3,7 +3,7 @@ Uso (GitHub Actions): LOCALFALCON_API_KEY=... python motore/importa.py zone/<id>
 richiesta.json: {"report_key": "e01e001722b17ba", "quartiere": "Crocetta", "citta": "Torino",
                  "categoria": "AgenzieImmobiliari", "frase_kw": "un'agenzia immobiliare", "centrata": "sulla Crocetta"}
 Se zona.json esiste già, prospect e registro restano intatti: si aggiornano solo punti, attività e metadati."""
-import json, os, sys, time, re, urllib.request, urllib.parse
+import json, os, sys, time, re, urllib.request, urllib.parse, urllib.error
 
 API = "https://api.localfalcon.com/v1/reports/{}/"
 MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
@@ -21,19 +21,42 @@ def num(x, tipo=float):
 
 
 def breve(nome):
-    """nome corto per le classifiche stampate; si corregge a mano nell'app"""
-    n = re.split(r"\s+[|\-–]\s+|\s*\|\s*", nome)[0].strip()
-    n = re.sub(r"^(agenzia\s+immobiliare|agenzia)\s+", "", n, flags=re.I) or nome
+    """nome corto per le classifiche stampate; si corregge a mano nell'app (Zone o scheda prospect)"""
+    n = re.split(r"\s*\|\s*|\s+\*+", nome)[0]
+    n = re.sub(r"(?i)^agenzia\s+immobiliare\s+(-\s+)?", "", n)
+    n = re.sub(r"(?i)\s+-\s+agenzia\b.*$", "", n)
+    n = re.sub(r"(?i)\btorino\s*-\s*", "", n)
+    n = re.sub(r"\s+di\s+[A-Z][\w']+\s+[A-Z][\w']+.*$", "", n)
+    n = re.sub(r"\s+[-–]\s+", " ", n)
+    n = re.sub(r"\s{2,}", " ", n).strip(" -–")
     if n.isupper() and len(n) > 4: n = n.title()
-    return n[:34]
+    if len(n) > 34: n = n[:34].rsplit(" ", 1)[0]
+    return n or nome[:34]
+
+
+def _post(chiave, api_key, modo):
+    """Local Falcon accetta la chiave come campo del form, parametro in URL o header Bearer"""
+    url = API.format(chiave)
+    corpo = urllib.parse.urlencode({"api_key": api_key} if modo != "bearer" else {}).encode()
+    if modo == "query": url += "?" + urllib.parse.urlencode({"api_key": api_key})
+    req = urllib.request.Request(url, data=corpo, method="POST")
+    if modo == "bearer": req.add_header("Authorization", "Bearer " + api_key)
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return r.status, json.load(r)
 
 
 def chiedi_report(chiave, api_key, attese=20):
-    corpo = urllib.parse.urlencode({"api_key": api_key}).encode()
+    api_key = api_key.strip()
+    modo, ultimo = None, None
     for _ in range(attese):
-        req = urllib.request.Request(API.format(chiave), data=corpo, method="POST")
-        with urllib.request.urlopen(req, timeout=90) as r:
-            stato, risposta = r.status, json.load(r)
+        for m in ([modo] if modo else ["form", "query", "bearer"]):
+            try:
+                stato, risposta = _post(chiave, api_key, m); modo = m; break
+            except urllib.error.HTTPError as e:
+                ultimo = e
+                if e.code not in (401, 403): raise
+        else:
+            raise RuntimeError(f"Local Falcon rifiuta la chiave API ({ultimo.code}): controlla il secret LOCALFALCON_API_KEY")
         if stato == 200 and (risposta.get("data") or {}).get("data_points"):
             return risposta["data"]
         time.sleep(30)          # 202 = scansione ancora in elaborazione
