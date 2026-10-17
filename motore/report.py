@@ -1,0 +1,348 @@
+"""Motore di stampa: due analisi per foglio A4 (210 x 148,5 mm ciascuna), mappa sulla metà sinistra.
+Layout identico alla versione definitiva v2 del 17/10/2026; i dati arrivano da zone/<id>/stampa.json,
+preparato dall'app. Uso: python motore/report.py zone/<id>/stampa.json"""
+import json, math, sys, os
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor, white
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+FD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts") + os.sep
+for n, f in [("P", "PlexSans-Regular"), ("P-M", "PlexSans-Medium"), ("P-B", "PlexSans-SemiBold"),
+             ("C", "PlexCond-Bold"), ("CS", "PlexCond-SemiBold"), ("MO", "PlexMono-Regular"), ("MOM", "PlexMono-Medium"), ("MOB", "PlexMono-Bold")]:
+    pdfmetrics.registerFont(TTFont(n, FD + f + ".ttf"))
+from reportlab.lib.fonts import addMapping
+addMapping("P", 0, 0, "P"); addMapping("P", 1, 0, "P-B"); addMapping("P", 0, 1, "P"); addMapping("P", 1, 1, "P-B")
+
+pdfmetrics.registerFont(TTFont("DJ", FD + "DejaVuSans.ttf"))
+import re
+STAR = "<font name='DJ' color='#E0A43A'>\u2605</font>"
+def stars(t):
+    return re.sub(r"(?<![\d,])([1-5],\d)(?![\d%])", lambda m: m.group(1) + "\u00a0" + STAR, t)
+DP = []          # punti della griglia: [{"lat":..,"lng":..,"results":[{"rank":..,"place_id":..}]}]
+JOB = {}         # stampa.json completo (occhiello, firma, centro)
+AVVISI = []
+
+INK = HexColor("#18232A"); BOX = HexColor("#F4F5F3"); MUTE = HexColor("#5F6B70"); LINE = HexColor("#D2D7D3")
+HOME = HexColor("#1A73E8"); NEGBG = HexColor("#FCE4E2"); NEGBR = HexColor("#C5221F"); NEGTX = HexColor("#5C1410")
+# colori della legenda: sono gli unici colori usati per dati e numeri
+C_TOP = HexColor("#2E7D5B"); C_MID = HexColor("#E0A43A"); C_LOW = HexColor("#D2643A"); C_NO = HexColor("#C9C4BA")
+TINT = {C_TOP: HexColor("#E3F0EA"), C_MID: HexColor("#FBF0DC"), C_LOW: HexColor("#F8E4DB"), C_NO: HexColor("#F1F0ED")}
+
+
+def color(r):
+    if r is None: return C_NO
+    if r <= 3: return C_TOP
+    if r <= 10: return C_MID
+    return C_LOW
+
+
+def pct_color(p):
+    """quota di punti: verde se la zona è coperta, giallo a metà, arancio se scoperta"""
+    if p >= 50: return C_TOP
+    if p >= 25: return C_MID
+    return C_LOW
+
+
+def P(text, font="P", size=7, lead=None, col=INK, align=TA_LEFT):
+    return Paragraph(text, ParagraphStyle("x", fontName=font, fontSize=size, leading=lead or size * 1.38, textColor=col, alignment=align))
+
+
+def eyebrow(c, x, y, text, col=None, size=5.6):
+    c.setFillColor(C_TOP); c.rect(x, y + .9 * mm, 4.5 * mm, .55 * mm, stroke=0, fill=1)
+    t = c.beginText(x + 6.3 * mm, y); t.setFont("MOB", size); t.setCharSpace(size * .14); t.setFillColor(col or MUTE)
+    t.textOut(text.upper()); t.setCharSpace(0); c.drawText(t)
+
+
+def draw_par(c, p, x, ytop, w):
+    _, h = p.wrap(w, 200 * mm); p.drawOn(c, x, ytop - h); return h
+
+
+SFIX = None
+SLOG = []
+
+
+def analysis(c, cfg, X, Y, W, H):
+    """disegna un'analisi nel riquadro (X, Y) in basso a sinistra, W x H"""
+    M = 7.5 * mm
+    MT, MB = 6.5 * mm, 4.5 * mm
+    top = Y + H - MT
+    # occhiello
+    eyebrow(c, X + M, top - 2 * mm, JOB["occhiello"])
+    c.setFillColor(MUTE); c.setFont("MO", 5.6); c.drawRightString(X + W - M, top - 2 * mm, "rilevazione del " + cfg["date"])
+    # titolo e sottotitolo allineati a sinistra
+    yy = top - 4.2 * mm
+    yy -= draw_par(c, P(cfg["title"], "C", 16, 17), X + M, yy, W - 2 * M) + 1.4 * mm
+    yy -= draw_par(c, P(cfg["subtitle"], "MO", 6.6, col=MUTE), X + M, yy, W - 2 * M) + 3.4 * mm
+    body_top = yy
+    foot_h = 7.2 * mm
+    body_bot = Y + MB + foot_h
+    # mappa: metà sinistra
+    half = W / 2
+    cosa = next((b for h_, b in cfg["blocks"] if not isinstance(b, dict)), None)
+    kl = 1.0
+    S = 88 * mm
+    for _ in range(4):
+        cp = P(f"<font name='C' size='{9 * kl:.2f}'>Cosa vuol dire</font><br/>{stars(cosa)}", "P", 6.7 * kl, 8.8 * kl, NEGTX)
+        _, hcosa = cp.wrap(S - 5 * mm, 80 * mm)
+        S = min(half - M - 3 * mm, body_top - body_bot - 1.5 * mm - 7.2 * mm - (hcosa + 3.2 * mm), 94 * mm)
+    SLOG.append(S)
+    if SFIX: S = SFIX
+    _, hcosa = cp.wrap(S - 5 * mm, 80 * mm)
+    hbox = (body_top - S - 7.2 * mm) - (body_bot + 1.5 * mm)
+    for kk in [x / 100 for x in range(130, 99, -2)]:
+        cq = P(f"<font name='C' size='{9 * kk:.2f}'>Cosa vuol dire</font><br/>{stars(cosa)}", "P", 6.7 * kk, 8.8 * kk, NEGTX)
+        if cq.wrap(S - 5.8 * mm, 80 * mm)[1] <= hbox - 3.6 * mm:
+            cp = cq; break
+    _, hcosa = cp.wrap(S - 5.8 * mm, 80 * mm)
+    mx = X + M; my = body_top - S
+    BG = cfg.get("bg")
+    if BG:
+        c.saveState(); pth = c.beginPath(); pth.roundRect(mx, my, S, S, 1.5 * mm); c.clipPath(pth, stroke=0, fill=0)
+        c.drawImage(BG, mx, my, S, S); c.restoreState()
+        c.setStrokeColor(LINE); c.setLineWidth(.6); c.roundRect(mx, my, S, S, 1.5 * mm, stroke=1, fill=0)
+    else:
+        c.setFillColor(BOX); c.setStrokeColor(LINE); c.setLineWidth(.6); c.roundRect(mx, my, S, S, 1.5 * mm, stroke=1, fill=1)
+    lats = [float(p["lat"]) for p in DP]; lngs = [float(p["lng"]) for p in DP]
+    la0, la1, lo0, lo1 = min(lats), max(lats), min(lngs), max(lngs)
+    pad = S * (.203 if BG else .085)
+    xy = lambda la, lo: (mx + pad + (lo - lo0) / (lo1 - lo0) * (S - 2 * pad), my + pad + (la - la0) / (la1 - la0) * (S - 2 * pad))
+    rr = (S - 2 * pad) / 6 * (.36 if BG else .40)
+    for pt in DP:
+        r = next((q["rank"] for q in pt["results"] if q["place_id"] == cfg["pid"]), None)
+        x, y = xy(float(pt["lat"]), float(pt["lng"]))
+        c.setFillColor(color(r)); c.setStrokeColor(white); c.setLineWidth(1 if BG else .8); c.circle(x, y, rr, stroke=1, fill=1)
+        c.setFillColor(white if r else HexColor("#5E5A52")); c.setFont("P-B" if BG else "P-M", (6 if r else 4.6) if BG else (6.4 if r else 5))
+        c.drawCentredString(x, y - ((2.1 if r else 1.6) if BG else (2.2 if r else 1.7)), str(r) if r else "20+")
+    x, y = xy(cfg["lat"], cfg["lng"])
+    # se il rombo coprirebbe un numero, lo sposto sul bordo del cerchio più vicino
+    cx, cy = min((xy(float(p["lat"]), float(p["lng"])) for p in DP), key=lambda q: math.hypot(q[0] - x, q[1] - y))
+    if math.hypot(cx - x, cy - y) < rr * 1.15:
+        ang = math.atan2(y - cy, x - cx) if math.hypot(cx - x, cy - y) > rr * .35 else math.radians(45)
+        x, y = cx + rr * math.cos(ang), cy + rr * math.sin(ang)
+    c.setFillColor(INK); c.setStrokeColor(white); c.setLineWidth(1)
+    c.saveState(); c.translate(x, y); c.rotate(45); c.rect(-1.6 * mm, -1.6 * mm, 3.2 * mm, 3.2 * mm, stroke=1, fill=1); c.restoreState()
+    # scala 500 m
+    span_m = (lo1 - lo0) * 111320 * math.cos(math.radians(JOB.get("lat_centro", 45.057)))
+    px = 500 / span_m * (S - 2 * pad)
+    sx, sy = (mx + S - px - 12 * mm, my + 2.6 * mm) if BG else (mx + 3 * mm, my + 2.6 * mm)
+    if BG:
+        c.setFillColor(white); c.setFillAlpha(.85); c.roundRect(sx - 1.5 * mm, sy - 1.8 * mm, px + 12 * mm, 4 * mm, .8 * mm, stroke=0, fill=1); c.setFillAlpha(1)
+    c.setStrokeColor(INK); c.setLineWidth(.7); c.line(sx, sy, sx + px, sy)
+    c.setFillColor(INK); c.setFont("MO", 5.5); c.drawString(sx + px + 1.2 * mm, sy - .7 * mm, "500 m")
+    # legenda centrata sotto la mappa
+    items = [(C_TOP, "Visibile", "1-3"), (C_MID, "Poco visibile", "4-10"), (C_LOW, "Invisibile", "11-20"), (C_NO, "Assente", "oltre 20"), (None, "Il suo ufficio", "")]
+    fs = 5.6
+    def iw_(b, r): return 3.2 * mm + c.stringWidth(b, "P-B", fs) + (c.stringWidth(" " + r, "MO", fs) if r else 0) + 2 * mm
+    while sum(iw_(b, r) for _, b, r in items) - 2 * mm > S and fs > 4.4: fs -= .1
+    widths = [iw_(b, r) for _, b, r in items]
+    lx = mx + (S - sum(widths) + 2 * mm) / 2; ly = my - 4.5 * mm
+    for (col, b, r), w in zip(items, widths):
+        if col is None:
+            c.setFillColor(INK); c.saveState(); c.translate(lx + 1.1 * mm, ly + .75 * mm); c.rotate(45); c.rect(-.85 * mm, -.85 * mm, 1.7 * mm, 1.7 * mm, stroke=0, fill=1); c.restoreState()
+        else:
+            c.setFillColor(col); c.circle(lx + 1.1 * mm, ly + .75 * mm, 1.15 * mm, stroke=0, fill=1)
+        c.setFillColor(INK); c.setFont("P-B", fs); c.drawString(lx + 3 * mm, ly, b)
+        if r:
+            c.setFillColor(MUTE); c.setFont("MO", fs); c.drawString(lx + 3 * mm + c.stringWidth(b, "P-B", fs) + c.stringWidth(" ", "MO", fs), ly, r)
+        lx += w
+    # colonna destra
+    # "Cosa vuol dire" sotto la mappa, allineato in basso
+    cb = body_bot + 1.5 * mm
+    c.setFillColor(NEGBG); c.roundRect(mx, cb, S, hbox, 1.2 * mm, stroke=0, fill=1)
+    c.setFillColor(NEGBR); c.rect(mx, cb, 1.1 * mm, hbox, stroke=0, fill=1)
+    cp.drawOn(c, mx + 3.2 * mm, cb + (hbox - hcosa) / 2)
+    cfg = dict(cfg); cfg["blocks"] = [b for b in cfg["blocks"] if isinstance(b[1], dict)]
+    rx = mx + S + 5 * mm; rw = X + W - M - rx
+    avail = body_top - (body_bot + 1.5 * mm)
+    k = 1.0
+    for kk in [x / 100 for x in range(120, 84, -2)]:
+        if right_column(c, cfg, rx, rw, body_top, kk, 0, draw=False) <= avail:
+            k = kk; break
+    need = right_column(c, cfg, rx, rw, body_top, k, 0, draw=False)
+    extra = max(0, (avail - need) / 2)
+    ry = body_top - right_column(c, cfg, rx, rw, body_top, k, extra, draw=True)
+    # piè di pagina centrato
+    fy = Y + MB + foot_h
+    c.setStrokeColor(LINE); c.setLineWidth(.5); c.line(X + M, fy - .6 * mm, X + W - M, fy - .6 * mm)
+    h = draw_par(c, P(cfg["method"], "MO", 4.9, 6.5, MUTE), X + M, fy - 1.8 * mm, W - 2 * M)
+    if ry < fy + .9 * mm: AVVISI.append(f"{cfg['name']}: testo troppo lungo, sfora di {round((fy - ry) / mm, 1)} mm")
+    if k < .9: AVVISI.append(f"{cfg['name']}: colonna destra compressa al {round(k * 100)}%")
+    return ry
+
+
+def right_column(c, cfg, rx, rw, top, k, extra, draw):
+    """colonna destra in stile IPSIG: numeri, classifica, prossimo passo e contatti. Restituisce l'altezza usata."""
+    y = top
+    # numeri chiave senza riquadri: cifra condensata, etichetta mono
+    gap = 3 * mm; bw = (rw - 2 * gap) / 3
+    labs = [P(stars(st["lab"].replace(" 3", "\u00a03").replace(" 20", "\u00a020")).upper().replace("<FONT NAME='DJ' COLOR='#E0A43A'>", "<font name='DJ' color='#E0A43A'>").replace("</FONT>", "</font>"), "MOB", 5 * k, 6.4 * k, MUTE) for st in cfg["stats"]]
+    fb = 21 * k
+    def wstat(st, f): return c.stringWidth(st["big"], "C", f) + (c.stringWidth(st.get("pct", ""), "C", f * .55) + 1.4 * mm if st.get("pct") else 0)
+    while max(wstat(st, fb) for st in cfg["stats"]) > bw - 1 * mm and fb > 12: fb -= .5
+    bh = fb * .78 + 1.6 * mm + max(l.wrap(bw, 50 * mm)[1] for l in labs)
+    if draw:
+        for i, s in enumerate(cfg["stats"]):
+            bx = rx + i * (bw + gap); col = s.get("color")
+            col = {"top": C_TOP, "mid": C_MID, "low": C_LOW, "ink": INK}[col] if col else INK
+            big, pct = s["big"], s.get("pct", "")
+            c.setFillColor(col); c.setFont("C", fb); c.drawString(bx, y - fb * .78, big)
+            if pct:
+                c.setFont("C", fb * .55); c.drawString(bx + c.stringWidth(big, "C", fb) + 1.4 * mm, y - fb * .78, pct)
+            labs[i].drawOn(c, bx, y - fb * .78 - 1.6 * mm - labs[i].height)
+    y -= bh + 2.4 * mm + extra
+    # classifica
+    rh = 3.75 * mm * k
+    if draw:
+        c.setFillColor(INK); c.setFont("C", 10.5 * k); c.drawString(rx, y - 3.4 * mm * k, cfg["list_title"])
+    y -= 5.2 * mm * k
+    if draw:
+        t = c.beginText(rx, y - 2.2 * mm); t.setFont("MOB", 4.8 * k); t.setCharSpace(.5); t.setFillColor(MUTE); t.textOut("AGENZIA"); t.setCharSpace(0); c.drawText(t)
+        t = c.beginText(rx + rw - c.stringWidth("RECENSIONI", "MOB", 4.8 * k) - 9 * .5, y - 2.2 * mm); t.setFont("MOB", 4.8 * k); t.setCharSpace(.5); t.setFillColor(MUTE); t.textOut("RECENSIONI"); t.setCharSpace(0); c.drawText(t)
+        c.setStrokeColor(LINE); c.setLineWidth(.4); c.line(rx, y - 3.2 * mm, rx + rw, y - 3.2 * mm)
+    y -= 3.6 * mm
+    sep_done = False
+    for rank, nm, rev, me in cfg["list"]:
+        if (rank is None or rank > 3) and not sep_done and any(r_ and r_ <= 3 for r_, *_ in cfg["list"]):
+            sep_done = True
+            if draw:
+                t = c.beginText(rx, y - 2.3 * mm); t.setFont("MOB", 4.6 * k); t.setCharSpace(.45); t.setFillColor(MUTE); t.textOut("OLTRE LE PRIME 3 POSIZIONI"); t.setCharSpace(0); c.drawText(t)
+                x0 = rx + c.stringWidth("OLTRE LE PRIME 3 POSIZIONI", "MOB", 4.6 * k) + 26 * .45 + 2 * mm
+                c.setStrokeColor(LINE); c.setLineWidth(.5); c.setDash(1.5, 1.5); c.line(x0, y - 1.9 * mm, rx + rw, y - 1.9 * mm); c.setDash()
+            y -= 3.2 * mm
+        col = color(rank)
+        if draw:
+            if me:
+                c.setFillColor(HexColor("#EAF1FD")); c.roundRect(rx - 1 * mm, y - rh + .3 * mm, rw + 1 * mm, rh, .8 * mm, stroke=0, fill=1)
+                c.setFillColor(HOME); c.rect(rx - 1 * mm, y - rh + .3 * mm, .9 * mm, rh, stroke=0, fill=1)
+            cy = y - rh / 2 + .3 * mm
+            c.setFillColor(col); c.circle(rx + 2.4 * mm, cy, 1.65 * mm * min(k, 1.1), stroke=0, fill=1)
+            c.setFillColor(white if rank else INK); c.setFont("MOB", (5.6 if rank else 4) * min(k, 1.1)); c.drawCentredString(rx + 2.4 * mm, cy - .65 * mm, str(rank) if rank else "20+")
+            c.setFillColor(INK); fn = "P-B" if me else "P"; c.setFont(fn, 7 * k); c.drawString(rx + 5.6 * mm, cy - .85 * mm * k, nm)
+            if me:
+                tx = rx + 5.6 * mm + c.stringWidth(nm, fn, 7 * k) + 1.6 * mm; tw_ = c.stringWidth("LEI", "MOB", 4.6 * k) + 1.8 * mm
+                c.setFillColor(HOME); c.roundRect(tx, cy - 1.15 * mm, tw_, 2.3 * mm, .5 * mm, stroke=0, fill=1)
+                c.setFillColor(white); c.setFont("MOB", 4.6 * k); c.drawCentredString(tx + tw_ / 2, cy - .55 * mm, "LEI")
+            if rev:
+                sw = c.stringWidth("\u2605", "DJ", 6.4 * k)
+                c.setFillColor(C_MID); c.setFont("DJ", 6.4 * k); c.drawRightString(rx + rw, cy - .8 * mm * k, "\u2605")
+                c.setFillColor(INK if me else MUTE); c.setFont("MOM", 6.2 * k); c.drawRightString(rx + rw - sw - .8 * mm, cy - .8 * mm * k, rev)
+        y -= rh
+    y -= 2.4 * mm + extra
+    # prossimo passo
+    for hd, body in cfg["blocks"]:
+        pad = 2.6 * mm; iw = rw - 2 * pad
+        h1 = P(f"<font name='C' size='{10.5 * k:.2f}'>{hd}</font><br/>{body['intro']}", "P", 6.5 * k, 8.4 * k)
+        _, hi = h1.wrap(iw, 80 * mm)
+        g = 1.4 * mm; cw = (iw - 3 * g) / 4
+        cells = [(P(t, "C", 7.4 * k, 8.4 * k, INK), P(d, "P", 5.9 * k, 7.1 * k, MUTE)) for t, d in body["items"]]
+        tw = cw - 2.4 * mm
+        ch = max(a_.wrap(tw, 20 * mm)[1] + b_.wrap(tw, 20 * mm)[1] for a_, b_ in cells) + 7.2 * mm
+        cta = P(body["outro"], "P-B", 6.9 * k, 8.6 * k, white, TA_CENTER)
+        _, hc = cta.wrap(iw - 4 * mm, 30 * mm)
+        hct = 13.6 * mm * min(k, 1.1)
+        tot = pad + hi + 2 * mm + ch + 2 * mm + hc + 2.6 * mm + 1.6 * mm + hct + pad
+        if draw:
+            c.setFillColor(BOX); c.roundRect(rx, y - tot, rw, tot, 1.5 * mm, stroke=0, fill=1)
+            yy = y - pad
+            h1.drawOn(c, rx + pad, yy - hi); yy -= hi + 2 * mm
+            for i, (t_, d_) in enumerate(cells):
+                cx = rx + pad + i * (cw + g); cy = yy
+                c.setFillColor(white); c.roundRect(cx, cy - ch, cw, ch, 1.2 * mm, stroke=0, fill=1)
+                c.setFillColor(C_TOP); c.circle(cx + 1.2 * mm + 1.9 * mm, cy - 3.2 * mm, 1.9 * mm, stroke=0, fill=1)
+                c.setFillColor(white); c.setFont("MOB", 6.2); c.drawCentredString(cx + 3.1 * mm, cy - 3.95 * mm, str(i + 1))
+                t_.drawOn(c, cx + 1.2 * mm, cy - 6 * mm - t_.height)
+                d_.drawOn(c, cx + 1.2 * mm, cy - 6 * mm - t_.height - d_.height)
+            yy -= ch + 2 * mm
+            c.setFillColor(C_TOP); c.roundRect(rx + pad, yy - hc - 2.6 * mm, iw, hc + 2.6 * mm, 1.2 * mm, stroke=0, fill=1)
+            cta.drawOn(c, rx + pad + 2 * mm, yy - 1.3 * mm - hc)
+            yy -= hc + 2.6 * mm + 1.6 * mm
+            # scheda contatti come la chiusura IPSIG
+            c.setFillColor(white); c.roundRect(rx + pad, yy - hct, iw, hct, 1.2 * mm, stroke=0, fill=1)
+            c.setFillColor(C_TOP); c.rect(rx + pad, yy - hct, 1.1 * mm, hct, stroke=0, fill=1)
+            kk = min(k, 1.1); x0 = rx + pad + 3.6 * mm
+            c.setFillColor(INK); c.setFont("C", 11 * kk); c.drawString(x0, yy - 4.6 * mm * kk, JOB["firma"]["nome"])
+            t = c.beginText(x0, yy - 7.4 * mm * kk); t.setFont("MOB", 4.8 * kk); t.setCharSpace(.6); t.setFillColor(MUTE); t.textOut(JOB["firma"]["ruolo"].upper()); t.setCharSpace(0); c.drawText(t)
+            x1 = rx + pad + iw * .47
+            c.setFillColor(C_TOP); c.setFont("DJ", 8 * kk); c.drawString(x1, yy - 4.8 * mm * kk, "\u260E")
+            c.setFillColor(INK); c.setFont("CS", 9.2 * kk); c.drawString(x1 + 4.2 * mm, yy - 4.8 * mm * kk, JOB["firma"]["telefono"])
+            c.setFillColor(C_TOP); c.setFont("DJ", 8 * kk); c.drawString(x1, yy - 9.6 * mm * kk, "\u2709")
+            c.setFillColor(INK); c.setFont("CS", 9.2 * kk); c.drawString(x1 + 4.2 * mm, yy - 9.6 * mm * kk, JOB["firma"]["email"])
+        y -= tot
+    return top - y
+
+
+def build(cfgs, out):
+    W, H = A4
+    c = canvas.Canvas(out, pagesize=A4)
+    c.setTitle(JOB.get("titolo_pdf", "Rilevazione di quartiere")); c.setAuthor(JOB["firma"]["nome"] + " Consulente")
+    for i in range(0, len(cfgs), 2):
+        analysis(c, cfgs[i], 0, H / 2, W, H / 2)
+        if i + 1 < len(cfgs): analysis(c, cfgs[i + 1], 0, 0, W, H / 2)
+        # linea di taglio
+        c.setStrokeColor(HexColor("#B8BCC2")); c.setLineWidth(.4); c.setDash(2, 2); c.line(4 * mm, H / 2, W - 4 * mm, H / 2); c.setDash()
+        c.setFillColor(HexColor("#B8BCC2")); c.setFont("DJ", 6); c.drawString(4 * mm, H / 2 + .8 * mm, "\u2702")
+        c.showPage()
+    c.save()
+
+
+FIRMA = {"nome": "Hector Rinaldi", "ruolo": "Consulente visibilità locale",
+         "telefono": "+39 351 894 2667", "email": "hector.rinaldi@italiaonline.it"}
+
+
+def esc(s):
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def prepara(job, cartella):
+    """trasforma stampa.json nelle configurazioni attese da analysis(); l'ordine di stampa
+    accoppia i e i+metà, così tagliando la risma a metà e sovrapponendo le pile l'ordine del giro resta corretto"""
+    global DP, JOB
+    JOB = job; JOB["firma"] = {**FIRMA, **(job.get("firma") or {})}
+    DP = [{"lat": la, "lng": lo, "results": [{"rank": i + 1, "place_id": p} for i, p in enumerate(r)]} for la, lo, r in job["punti"]]
+    bg = os.path.join(cartella, job["sfondo"]) if job.get("sfondo") else None
+    if bg and not os.path.exists(bg): AVVISI.append("sfondo mappa non trovato: stampa senza mappa"); bg = None
+    nxt = job["prossimo_passo"]
+    nxt = {"intro": esc(nxt["intro"]), "items": [[esc(a), esc(b)] for a, b in nxt["items"]], "outro": esc(nxt["outro"])}
+    cfgs = []
+    for a in job["analisi"]:
+        c = dict(a)
+        c["title"] = esc(a["title"]); c["subtitle"] = esc(a["subtitle"]); c["method"] = esc(a["method"])
+        c["stats"] = [{**s, "lab": esc(s["lab"])} for s in a["stats"]]
+        # list e list_title vanno in drawString: testo semplice, niente escape
+        c["blocks"] = [["Cosa vuol dire", esc(a["cosa"])], ["Il prossimo passo", nxt]]
+        c["bg"] = bg
+        cfgs.append(c)
+    h = (len(cfgs) + 1) // 2
+    out = []
+    for i in range(h):
+        out.append(cfgs[i])
+        if i + h < len(cfgs): out.append(cfgs[i + h])
+    return out
+
+
+def genera(percorso_job):
+    import io
+    global SFIX
+    cartella = os.path.dirname(os.path.abspath(percorso_job))
+    job = json.load(open(percorso_job, encoding="utf-8"))
+    cfgs = prepara(job, cartella)
+    SLOG.clear(); SFIX = None
+    build(cfgs, io.BytesIO())            # primo passaggio: misura la mappa più piccola
+    SFIX = min(SLOG); AVVISI.clear()     # secondo passaggio: stessa dimensione mappa su tutte le analisi
+    os.makedirs(os.path.join(cartella, "stampa"), exist_ok=True)
+    nome = job["file"] + ".pdf"
+    build(cfgs, os.path.join(cartella, "stampa", nome))
+    esito = {"file": "stampa/" + nome, "richiesta": job.get("richiesta"), "analisi": len(cfgs),
+             "fogli": (len(cfgs) + 1) // 2, "avvisi": sorted(set(AVVISI))}
+    json.dump(esito, open(os.path.join(cartella, "stampa", "esito.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print(json.dumps(esito, ensure_ascii=False, indent=1))
+
+
+if __name__ == "__main__":
+    genera(sys.argv[1])
