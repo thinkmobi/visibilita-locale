@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.2.1';
+const VERSIONE = '1.3.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -276,6 +276,7 @@ function apriProspect(zid, id) {
   const inp = (campo, lab, tipo = 'text') => `<label class="f">${lab}<input data-c="${campo}" type="${tipo}" value="${esc(p[campo] ?? '')}"></label>`;
   const html = `
   <div class="riga"><span class="pill ${prioClasse(p)}">${esc(p.priorita || '—')}</span><span class="sub">${esc(z.meta.quartiere)} · ${esc(p.segmento || '')} · ${esc(p.id)}</span></div>
+  ${a.c === false ? `<div class="allerta"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><div><b>Scheda Google non rivendicata dal titolare</b><span>Nessuno la gestisce: non può rispondere alle recensioni né correggere orari e categoria. È il primo gancio da usare.</span></div></div>` : ''}
   <div class="azioni">
     <a class="btn" ${t ? `href="tel:${tel(t)}"` : 'disabled'}>${ico('tel')}Chiama</a>
     <a class="btn" ${t ? `href="https://wa.me/${wa(t)}" target="_blank" rel="noopener"` : 'disabled'}>${ico('wa')}WhatsApp</a>
@@ -296,7 +297,7 @@ function apriProspect(zid, id) {
   <div><b class="c-${L.colorePct(Math.round(m.top20 / m.N * 100))}">${m.top20}/${m.N}</b><span>tra le prime 20</span></div>
   <div><b>${m.atrp ? L.virgola(m.atrp) : '—'}</b><span>posizione media</span></div><div><b>${a.rv ?? '—'}</b><span>recensioni ${L.virgola(a.r)}</span></div></div>
   <div class="mt">${minigriglia(z, p.pid)}</div>
-  ${a.c === false ? '<div class="avviso">Scheda Google non rivendicata dal titolare.</div>' : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
+  ${an ? `<div class="box classifica"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
   <div class="eb">Registro (${reg.length})</div>
   ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(r.canale)}</span></div>
      ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + gg(r.entro) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
@@ -308,7 +309,7 @@ function apriProspect(zid, id) {
   <div class="due"><label class="f">Nome breve in stampa<input id="breve" value="${esc(a.b || '')}"></label>
   <label class="f">Riferimento${sel('luogo', L.LUOGHI, (p.report && p.report.luogo) || z.meta.luogo || 'ufficio').replace('data-c="luogo"', 'data-r="luogo"')}</label></div>
   <label class="f">Sottotitolo<input data-r="sottotitolo" value="${esc(an.subtitle)}"></label>
-  <div class="box"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}
+  ` : ''}
   <div class="eb">Dati</div>
   ${inp('nome', 'Nome')}${inp('referente', 'Referente')}
   <div class="due">${inp('telefono', 'Telefono', 'tel')}${inp('email', 'Email', 'email')}</div>
@@ -317,21 +318,39 @@ function apriProspect(zid, id) {
   <div class="due"><label class="f">Segmento${sel('segmento', ['Indipendente', 'Franchising'], p.segmento)}</label>${inp('visita_entro', 'Visita entro', 'date')}</div>
   <label class="f">Gancio commerciale<textarea data-c="gancio">${esc(p.gancio)}</textarea></label>
   <label class="f">Note<textarea data-c="note">${esc(p.note)}</textarea></label>
-  <div class="row mt"><button class="btn mini" id="elimina" style="color:var(--neg)">Elimina prospect</button></div>`;
-  const f = apriFoglio(p.nome, html, () => { location.hash = ST.indietro || '#prospect'; });
-  f.querySelectorAll('[data-c]').forEach((el) => el.addEventListener('change', () => {
-    const v = el.type === 'number' ? Number(el.value || 0) : el.value; aggiorna(zid, id, { [el.dataset.c]: v });
-    if (el.dataset.c === 'nome') f.querySelector('.testa h2').textContent = v;
+  <div class="row mt"><button class="btn mini" id="elimina" style="color:var(--neg)">Elimina prospect</button></div>
+  <div class="barra-salva"><button class="btn annulla" id="annulla">Annulla</button><button class="btn pri" id="salva" disabled>Salva</button></div>`;
+  const D = {}, DR = {}; let DB = null, sporco = false;
+  const segna = () => { sporco = true; $('#salva', f).disabled = false; $('#salva', f).textContent = 'Salva modifiche'; };
+  const salva = () => {
+    if (!sporco) return;
+    const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
+    aggiorna(zid, id, campi);
+    if (DB !== null && z.attivita[p.pid]) { z.attivita[p.pid].b = DB; z.attivita[p.pid].u = ora(); modificato(zid); }
+    sporco = false; toast('Salvato');
+  };
+  const esci = () => { location.hash = ST.indietro || '#prospect'; };
+  const annulla = () => { if (sporco && !confirm('Annullare le modifiche non salvate?')) return; sporco = false; esci(); };
+  const f = apriFoglio(p.nome, html, annulla);
+  f.querySelectorAll('[data-c]').forEach((el) => el.addEventListener('input', () => {
+    D[el.dataset.c] = el.type === 'number' ? Number(el.value || 0) : el.value; segna();
+    if (el.dataset.c === 'nome') f.querySelector('.testa h2').textContent = el.value;
   }));
-  f.querySelectorAll('[data-r]').forEach((el) => el.addEventListener('change', () => {
-    const r = { ...(p.report || {}) }; r[el.dataset.r] = el.type === 'checkbox' ? el.checked : el.value;
-    aggiorna(zid, id, { report: r }); if (el.dataset.r === 'luogo') apriProspect(zid, id);
+  f.querySelectorAll('[data-c]').forEach((el) => el.tagName === 'SELECT' && el.addEventListener('change', () => { D[el.dataset.c] = el.value; segna(); }));
+  f.querySelectorAll('[data-r]').forEach((el) => el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
+    DR[el.dataset.r] = el.type === 'checkbox' ? el.checked : el.value; segna();
   }));
-  f.querySelectorAll('[data-quando]').forEach((el) => (el.onclick = () => { const d = piuGiorni(+el.dataset.quando); f.querySelector('[data-c=data_prossima]').value = d; aggiorna(zid, id, { data_prossima: d }); }));
-  const br = $('#breve', f); if (br) br.onchange = () => { z.attivita[p.pid].b = br.value; z.attivita[p.pid].u = ora(); modificato(zid); apriProspect(zid, id); };
-  const bz = $('#bozza', f); if (bz) bz.onclick = () => { const b = L.bozza(z, { ...p, report: { ...p.report, titolo: '', cosa: '' } }); aggiorna(zid, id, { report: { ...(p.report || {}), titolo: b.titolo, cosa: b.cosa, titolo_lista: '', punto: null } }); apriProspect(zid, id); toast('Bozza rigenerata'); };
-  $('#registra', f).onclick = () => formContatto(zid, id);
-  $('#elimina', f).onclick = () => { if (confirm(`Eliminare ${p.nome}? Il registro resta nello storico del repository.`)) { aggiorna(zid, id, { del: true }); location.hash = '#prospect'; } };
+  f.querySelectorAll('[data-quando]').forEach((el) => (el.onclick = () => { const d = piuGiorni(+el.dataset.quando); f.querySelector('[data-c=data_prossima]').value = d; D.data_prossima = d; segna(); }));
+  const br = $('#breve', f); if (br) br.oninput = () => { DB = br.value; segna(); };
+  const bz = $('#bozza', f); if (bz) bz.onclick = () => {
+    const b = L.bozza(z, { ...p, report: { ...p.report, titolo: '', cosa: '' } });
+    f.querySelector('[data-r=titolo]').value = b.titolo; f.querySelector('[data-r=cosa]').value = b.cosa;
+    Object.assign(DR, { titolo: b.titolo, cosa: b.cosa, titolo_lista: '', punto: null }); segna(); toast('Bozza pronta: premi Salva per tenerla');
+  };
+  $('#salva', f).onclick = () => { salva(); esci(); };
+  $('#annulla', f).onclick = annulla;
+  $('#registra', f).onclick = () => { salva(); formContatto(zid, id); };
+  $('#elimina', f).onclick = () => { if (confirm(`Eliminare ${p.nome}? Il registro resta nello storico del repository.`)) { sporco = false; aggiorna(zid, id, { del: true }); location.hash = '#prospect'; } };
 }
 
 /* ---------- registra contatto: un solo modulo aggiorna registro, stato e prossima azione ---------- */
@@ -351,7 +370,8 @@ function formContatto(zid, id, preset = {}) {
     <label class="f">Prossima azione<input id="cPr" value="${esc(v.prossima)}"></label>
     <div class="due"><label class="f">Entro il<input id="cEn" type="date" value="${v.entro}"></label>
     <label class="f">Nuovo stato<select id="cSt">${STATI.map((s) => `<option ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div></div>
-    <button class="btn pri mt" style="width:100%" id="salva">Salva contatto</button>`, () => apriProspect(zid, id));
+    <div class="barra-salva"><button class="btn annulla" id="annullaC">Annulla</button><button class="btn pri" id="salva">Salva contatto</button></div>`, () => apriProspect(zid, id));
+    $('#annullaC').onclick = () => { if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id); };
     const leggi = () => { v.data = $('#cData').value; v.interlocutore = $('#cInt').value; v.emerso = $('#cEm').value; v.prossima = $('#cPr').value; v.entro = $('#cEn').value; v.stato = $('#cSt').value; };
     f.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => {
       leggi(); v[b.dataset.k] = b.dataset.v;
