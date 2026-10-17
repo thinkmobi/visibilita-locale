@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.3.0';
+const VERSIONE = '1.3.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -195,13 +195,15 @@ function miniMappa(z, p, px = 54) {
   }));
   return `<svg class="mini" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" role="img" aria-label="Mappa di visibilità">${dots}</svg>`;
 }
+const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false);
 function cardProspect({ zid, z, p }, extra = '') {
   const g = urgenza(p);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
   return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">
     <div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${esc(p.priorita || '—')}</span></div>
-    ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}${extra}</div></a>`;
+    ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
+    ${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}${extra}</div></a>`;
 }
 function vOggi() {
   const tt = tutti(); const ap = tt.filter((x) => aperto(x.p));
@@ -230,12 +232,13 @@ function vProspect() {
   if (f.stato === 'aperti') tt = tt.filter((x) => aperto(x.p)); else if (f.stato) tt = tt.filter((x) => x.p.stato === f.stato);
   if (f.prio) tt = tt.filter((x) => x.p.priorita === f.prio);
   if (f.zona) tt = tt.filter((x) => x.zid === f.zona);
+  if (f.nr) tt = tt.filter((x) => nonRiv(x.z, x.p));
   if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => (x.p.nome + ' ' + x.p.referente + ' ' + x.p.indirizzo + ' ' + x.p.note).toLowerCase().includes(q)); }
   tt.sort((a, b) => (a.p.priorita || '9').localeCompare(b.p.priorita || '9') || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
   const chip = (campo, val, lab) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${esc(lab)}</button>`;
   return `<input class="cerca" id="q" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}">
   <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
-  <div class="filtri">${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s)).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
+  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s)).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
   <div class="sub" style="margin:4px 0 8px">${tt.length} prospect</div>
   <div class="lista">${tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>'}</div>`;
 }
@@ -509,7 +512,7 @@ function apriZona(zid) {
   <div class="filtri">${[['top20', 'Presenza'], ['top3', 'Top 3'], ['rv', 'Recensioni'], ['nome', 'Nome']].map(([k, l]) => `<button class="chip ${ord === k ? 'on' : ''}" data-ord="${k}">${l}</button>`).join('')}
   <button class="chip ${ST.f.soloNuove ? 'on' : ''}" id="soloNuove">Solo non in lista</button></div>
   <div class="lista">${righe.slice(0, 150).map(({ pid, a, m }) => `<div class="card"><div class="riga"><span class="nome">${esc(a.n)}</span>${giaP.has(pid) ? '<span class="pill">in lista</span>' : `<button class="btn mini" data-nuovo="${pid}">+ Prospect</button>`}</div>
-    <div class="sub">${m.top3}/${m.N} top 3 · ${m.top20}/${m.N} top 20 · ${a.rv || 0} rec. ${L.virgola(a.r)}${a.c === false ? ' · non rivendicata' : ''}${RETI.test(a.n) ? ' · rete' : ''}</div></div>`).join('')}</div>`,
+    <div class="sub">${m.top3}/${m.N} top 3 · ${m.top20}/${m.N} top 20 · ${a.rv || 0} rec. ${L.virgola(a.r)}${a.c === false ? ' · <b class="c-neg">non rivendicata</b>' : ''}${RETI.test(a.n) ? ' · rete' : ''}</div></div>`).join('')}</div>`,
   () => { location.hash = '#zone'; });
   f.querySelectorAll('[data-ord]').forEach((b) => (b.onclick = () => { ST.f.ordZ = b.dataset.ord; apriZona(zid); }));
   $('#soloNuove', f).onclick = () => { ST.f.soloNuove = !ST.f.soloNuove; apriZona(zid); };
@@ -684,6 +687,7 @@ function legaVista(v) {
   if (v === 'oggi') V.querySelectorAll('[data-kpi]').forEach((b) => (b.onclick = () => { ST.f.kpi = ST.f.kpi === b.dataset.kpi ? '' : b.dataset.kpi; render(); }));
   if (v === 'prospect') {
     V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; render(); }));
+    $('#filtroNR').onclick = () => { ST.f.nr = !ST.f.nr; render(); };
     const q = $('#q'); q.oninput = () => { ST.f.q = q.value; clearTimeout(ST.timer.q); ST.timer.q = setTimeout(() => { render(); const n = $('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   }
   if (v === 'giro') {
