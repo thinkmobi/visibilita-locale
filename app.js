@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.5.1';
+const VERSIONE = '1.5.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -167,7 +167,7 @@ const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
 
 /* ---------- router ---------- */
 const VISTE = { oggi: vOggi, prospect: vProspect, giro: vGiro, zone: vZone, cruscotto: vCruscotto, altro: vAltro };
-const TITOLI = { oggi: 'Oggi', prospect: 'Prospect', giro: 'Giro', zone: 'Zone', cruscotto: 'Numeri', altro: 'Altro' };
+const TITOLI = { oggi: 'Oggi', prospect: 'Prospect', giro: 'Giro', zone: 'Zone', cruscotto: 'Numeri', altro: 'Profilo' };
 function render() {
   const [vista, a, b] = (location.hash.slice(1) || 'oggi').split('/');
   document.querySelectorAll('.tab a').forEach((x) => x.classList.toggle('on', x.dataset.t === vista));
@@ -244,14 +244,14 @@ function vOggi() {
   const K = { scad: [scad, 'Azioni scadute', 'c-neg'], vic: [vic, 'Entro 2 giorni', 'c-mid'], senza: [senza, 'Senza prossima azione', 'c-low'], mai: [mai, 'Mai contattati', ''] };
   const sel = ST.f.kpi && K[ST.f.kpi];
   const lista = sel ? sel[0] : ap.filter((x) => x.p.data_prossima && urgenza(x.p) <= 7).sort((a, b) => (a.p.data_prossima > b.p.data_prossima ? 1 : -1));
-  return `${giroOggi.length ? `<a class="card giro-oggi" href="#giro"><div class="riga"><b>Giro di oggi: ${giroOggi.length} tappe</b><span>→</span></div><div class="sub">${giroOggi.filter((x) => x.p.giro.fatto).length} fatte</div></a>` : ''}
+  return `${giroOggi.length ? `<a class="card giro-oggi" href="#giro"><div class="riga"><b>Giro di oggi: ${giroOggi.length} tappe</b><span>→</span></div><div class="sub">${giroOggi.filter((x) => x.p.giro.fatto).length} report consegnati</div></a>` : ''}
   <div class="kpi mt">${Object.entries(K).map(([k, [arr, lab, c]]) => `<button data-kpi="${k}" class="${ST.f.kpi === k ? 'sel' : ''}"><b class="${c}">${arr.length}</b><span>${lab}</span></button>`).join('')}</div>
   <div class="eb">${sel ? esc(sel[1]) : 'Prossimi 7 giorni'}</div>
   <div class="lista">${lista.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Niente in scadenza. Buon lavoro.</div>'}</div>`;
 }
 function benvenuto() {
   return `<div class="box"><h2>Benvenuto</h2><p>Nessun dato su questo dispositivo.</p>
-  <p>${GH.ok() ? 'Il repository dati è collegato ma non contiene ancora zone: importa la prima da <b>Zone</b>.' : 'Collega il repository dati da <b>Altro → Collegamento GitHub</b>, poi importa la prima zona.'}</p>
+  <p>${GH.ok() ? 'Il repository dati è collegato ma non contiene ancora zone: importa la prima da <b>Zone</b>.' : 'Collega il repository dati da <b>Profilo → Collegamento GitHub</b>, poi importa la prima zona.'}</p>
   <a class="btn pri" href="#${GH.ok() ? 'zone' : 'altro'}">${GH.ok() ? 'Vai a Zone' : 'Collega GitHub'}</a></div>`;
 }
 
@@ -423,7 +423,7 @@ function formContatto(zid, id, preset = {}) {
       z.registro[rid] = { id: rid, p: id, data: v.data, canale: v.canale, interlocutore: v.interlocutore, esito: v.esito, emerso: v.emerso, prossima: v.prossima, entro: v.entro, u: ora() };
       const campi = { stato: v.stato, prossima: CHIUSI.includes(v.stato) ? '' : v.prossima, data_prossima: CHIUSI.includes(v.stato) ? '' : v.entro };
       if (v.interlocutore && !p.referente) campi.referente = v.interlocutore;
-      if (preset.giro) campi.giro = { ...p.giro, fatto: true };
+      if (preset.giro) campi.giro = { ...p.giro, fatto: true, fatto_il: v.data };
       aggiorna(zid, id, campi); toast('Contatto salvato');
       if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id);
     };
@@ -443,20 +443,21 @@ function vGiro() {
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
   return `<div class="row"><input type="date" id="gData" class="cerca" style="flex:1" value="${d}"><button class="btn" id="gAgg">+ Tappa</button></div>
   <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${x}">${ggLungo(x)}</button>`).join('')}</div>
-  ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da fare)</a></div>
+  ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
   ${Object.entries(perZona).map(([zid, arr]) => `
-    <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${arr.length} tappe · ${arr.filter((x) => x.p.giro.fatto).length} fatte</div>
+    <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${arr.length} tappe pianificate · ${arr.filter((x) => x.p.giro.fatto).length} consegnate</div>
     <div class="lista">${arr.map((x, i) => {
       const ind = x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a || '';
       return `<div class="card ${x.p.giro.fatto ? 'ok-fatto' : ''}"><div class="riga" style="align-items:flex-start">
       <span class="num">${x.p.giro.fatto ? '✓' : i + 1}</span>
-      <a href="#p/${zid}/${x.p.id}" style="flex:1;text-decoration:none;min-width:0"><div class="nome">${esc(x.p.nome)}</div><div class="sub">${esc(x.p.giro.orario || '')} · ${esc(ind.split(',').slice(0, 2).join(','))}</div>
+      <a href="#p/${zid}/${x.p.id}" style="flex:1;text-decoration:none;min-width:0"><div class="nome">${esc(x.p.nome)}</div>
+      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : '<span class="stato-tappa">Da visitare</span>'}<div class="sub">${esc(x.p.giro.orario || '')} · ${esc(ind.split(',').slice(0, 2).join(','))}</div>
       ${x.p.report && x.p.report.includi === false ? '<div class="sub">senza report</div>' : ''}</a>
       <div class="ordine"><button data-su="${zid}|${x.p.id}">↑</button><button data-giu="${zid}|${x.p.id}">↓</button></div></div>
       <div class="row mt"><a class="btn mini" href="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(ind)}" target="_blank" rel="noopener">Naviga</a>
       <input type="time" class="btn mini" data-ora="${zid}|${x.p.id}" value="${esc(x.p.giro.orario || '')}">
-      ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Annulla</button>` : `<button class="btn mini pri" data-fatto="${zid}|${x.p.id}">Fatto</button>`}
+      ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Riapri tappa</button>` : `<button class="btn mini segna" data-fatto="${zid}|${x.p.id}">Segna consegnato</button>`}
       <button class="btn mini" data-togli="${zid}|${x.p.id}" title="Togli dal giro">✕</button></div></div>`;
     }).join('')}</div>
     <div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length} analisi · ${Math.ceil(arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length / 2)} fogli A4</span></div>
@@ -736,7 +737,7 @@ function legaVista(v) {
     V.querySelectorAll('[data-su],[data-giu]').forEach((b) => (b.onclick = () => { const [zid, id] = (b.dataset.su || b.dataset.giu).split('|'); spostaTappa(zid, id, b.dataset.su ? -1 : 1); }));
     V.querySelectorAll('[data-ora]').forEach((el) => (el.onchange = () => { const [zid, id] = el.dataset.ora.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, orario: el.value } }); }));
     V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio in agenzia', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
-    V.querySelectorAll('[data-annulla]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.annulla.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, fatto: false } }); ST.restaScroll = true; render(); }));
+    V.querySelectorAll('[data-annulla]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.annulla.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, fatto: false, fatto_il: '' } }); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-togli]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.togli.split('|'); aggiorna(zid, id, { giro: {} }); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-stampa]').forEach((b) => (b.onclick = () => generaPdf(b.dataset.stampa)));
   }

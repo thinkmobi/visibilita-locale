@@ -124,3 +124,8 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600}
 .chip-ns{border-color:var(--o);color:#A85F00;font-weight:600}.chip-ns.on{background:#FEEBD3;border:2px solid var(--o);color:#A85F00}
 .s-rotto{background:var(--neg-t);color:var(--r2);border:1px solid #F2B8B5;cursor:pointer}
 .giro-oggi{background:var(--top-t)!important;border:1px solid #BFE0C9!important;border-left:5px solid var(--g1)!important;color:var(--ink)!important}.giro-oggi b{color:var(--g1)}
+.stato-tappa{display:inline-block;margin-top:4px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;background:#ECEEEB;color:var(--mute);border:1px solid var(--line)}
+.stato-tappa.consegnata{background:var(--top-t);color:var(--g1);border-color:#BFE0C9}
+.btn.segna{background:#fff;border:1.5px solid var(--g1);color:var(--g1);font-weight:600}
+.ok-fatto{background:#FAFDFB}.num{background:#fff;color:var(--ink);border:1.5px solid var(--ink)}.ok-fatto .num{background:var(--top-t);color:var(--g1);border-color:var(--g1)}
+.card .row.mt{flex-wrap:nowrap;gap:6px}.card input[type=time].btn{width:104px;padding:4px 6px}
