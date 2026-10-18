@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.1';
+const VERSIONE = '1.6.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -26,8 +26,13 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ora = () => Date.now();
 const iso = (d) => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); };
-const oggi = () => iso(new Date());
-const piuGiorni = (n, da) => { const d = da ? new Date(da + 'T12:00') : new Date(); d.setDate(d.getDate() + n); return iso(d); };
+/* data e ora sempre di Roma, formato 24 ore, qualunque sia il fuso o il formato impostato sul telefono */
+const TZ = 'Europe/Rome';
+const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const oraRoma = (d, opz = {}) => new Date(d).toLocaleString('it-IT', { timeZone: TZ, hourCycle: 'h23', ...opz });
+const ORARI = (() => { const o = []; for (let m = 7 * 60; m <= 21 * 60; m += 15) o.push(`${String(m / 60 | 0).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`); return o; })();
+const sceltaOra = (attr, val) => `<select class="btn mini ora" ${attr} aria-label="Orario"><option value="">--:--</option>${(val && !ORARI.includes(val) ? [val, ...ORARI] : ORARI).map((o) => `<option${o === val ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+const piuGiorni = (n, da) => { const d = da ? new Date(da + 'T12:00') : new Date(oggi() + 'T12:00'); d.setDate(d.getDate() + n); return iso(d); };
 const giorni = (s) => (s ? Math.round((new Date(s + 'T12:00') - new Date(oggi() + 'T12:00')) / 864e5) : null);
 const gg = (s) => { if (!s) return ''; const [a, m, d] = s.split('-'); return `${d}/${m}`; };
 const ggLungo = (s) => (s ? new Date(s + 'T12:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }) : '');
@@ -150,7 +155,7 @@ async function scarica() {
       await salvaLocale(id);
       if (ST.zone[id].dirty) invia(id);
     }
-    statoSync('ok', 'Aggiornato ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }));
+    statoSync('ok', 'Aggiornato ' + oraRoma(Date.now(), { hour: '2-digit', minute: '2-digit' }));
     ST.ultimo = ora();
     render();
   } catch (e) { console.error(e); statoSync('err', e.status === 401 ? 'Token non valido' : 'Non raggiungibile'); }
@@ -447,7 +452,7 @@ function vGiro() {
   const perZona = {}; tappe.forEach((x) => (perZona[x.zid] = perZona[x.zid] || []).push(x));
   const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
-  return `<div class="row"><input type="date" id="gData" class="cerca" style="flex:1" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
+  return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
   <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${x}">${ggLungo(x)}</button>`).join('')}</div>
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
@@ -460,7 +465,7 @@ function vGiro() {
       <div class="tappa-testa"><span class="num">${x.p.giro.fatto ? '✓' : i + 1}</span>
       ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : '<span class="stato-tappa">Da visitare</span>'}
       ${x.p.report && x.p.report.includi === false ? '<span class="sub">senza report</span>' : ''}
-      <input type="time" class="btn mini" data-ora="${zid}|${x.p.id}" value="${esc(x.p.giro.orario || '')}" aria-label="Orario">
+      ${sceltaOra(`data-ora="${zid}|${x.p.id}"`, x.p.giro.orario || '')}
       <span class="ordine"><button data-su="${zid}|${x.p.id}" aria-label="Su">↑</button><button data-giu="${zid}|${x.p.id}" aria-label="Giù">↓</button></span></div>
       <a class="con-mappa" href="#p/${zid}/${x.p.id}">${miniMappa(x.z, x.p)}<div class="card-testo">${testoProspect(x.z, x.p, `<div class="sub ind">${esc(ind.split(',').slice(0, 2).join(','))}${ref ? ' · ' + esc(ref) : ''}</div>`)}</div></a>
       <div class="row mt"><a class="btn mini" href="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(ind)}" target="_blank" rel="noopener">Naviga</a>
@@ -590,7 +595,7 @@ function apriZona(zid) {
     .sort((x, y) => ord === 'rv' ? (y.a.rv || 0) - (x.a.rv || 0) : ord === 'nome' ? x.a.n.localeCompare(y.a.n) : (y.m[ord] - x.m[ord]) || ((y.a.rv || 0) - (x.a.rv || 0)));
   const f = apriFoglio(`${z.meta.quartiere} · ${z.meta.keyword}`, `
   <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${z.punti.length} punti</div>
-  <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${new Date(s.siti.aggiornato).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => STATO_SITO[v.stato]).length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
+  <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${oraRoma(s.siti.aggiornato, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => STATO_SITO[v.stato]).length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
   <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button></div>
   <div class="eb">Attività trovate</div>
   <div class="filtri">${[['top20', 'Presenza'], ['top3', 'Top 3'], ['rv', 'Recensioni'], ['nome', 'Nome']].map(([k, l]) => `<button class="chip ${ord === k ? 'on' : ''}" data-ord="${k}">${l}</button>`).join('')}

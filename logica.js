@@ -144,7 +144,7 @@
   };
 
   L.nomeFile = (z, data) => {
-    const d = (data || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(2);
+    const d = (data || new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())).replace(/-/g, '').slice(2);
     const q = (z.meta.quartiere || '').replace(/[^\p{L}\p{N}]+/gu, '');
     return `${d}-${z.meta.categoria || 'Analisi'}-${q}`;
   };
