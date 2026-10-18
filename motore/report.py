@@ -73,6 +73,13 @@ SFIX = None
 SLOG = []
 
 
+def luogo_legenda(cfg):
+    """'Il suo studio', 'La sua sede'... dall'intestazione della classifica; di default 'Il suo ufficio'"""
+    m = re.search(r"\b(?:AL|DAL)(LA)? SU[OA] ([A-ZÀ-Ù]+)", (cfg.get("list_head") or "").upper())
+    if not m: return "Il suo ufficio"
+    return ("La sua " if m.group(1) else "Il suo ") + m.group(2).lower()
+
+
 def analysis(c, cfg, X, Y, W, H):
     """disegna un'analisi nel riquadro (X, Y) in basso a sinistra, W x H"""
     M = 7.5 * mm
@@ -152,7 +159,7 @@ def analysis(c, cfg, X, Y, W, H):
     c.setStrokeColor(INK); c.setLineWidth(.7); c.line(sx, sy, sx + px, sy)
     c.setFillColor(INK); c.setFont("MO", 5.5); c.drawString(sx + px + 1.2 * mm, sy - .7 * mm, "500 m")
     # legenda centrata sotto la mappa
-    items = [(C_TOP, "Visibile", "1-3"), (C_MID, "Poco visibile", "4-10"), (C_LOW, "Invisibile", "11-20"), (C_NO, "Assente", "oltre 20"), (None, "Il suo ufficio", "")]
+    items = [(C_TOP, "Visibile", "1-3"), (C_MID, "Poco visibile", "4-10"), (C_LOW, "Invisibile", "11-20"), (C_NO, "Assente", "oltre 20"), (None, luogo_legenda(cfg), "")]
     fs = 5.6
     def iw_(b, r): return 3.2 * mm + c.stringWidth(b, "P-B", fs) + (c.stringWidth(" " + r, "MO", fs) if r else 0) + 2 * mm
     while sum(iw_(b, r) for _, b, r in items) - 2 * mm > S and fs > 4.4: fs -= .1
