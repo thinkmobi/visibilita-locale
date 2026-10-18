@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.0';
+const VERSIONE = '1.6.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -226,14 +226,16 @@ function badgeSito(z, p) {
   return `<span class="badge-sito s-${s.k}" ${s.href ? `data-href="${esc(s.href)}"` : ''}>${icona}${esc(s.label)}</span>`;
 }
 const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false);
-function cardProspect({ zid, z, p }, extra = '') {
+function testoProspect(z, p, extra = '') {
   const g = urgenza(p);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
-  return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">
-    <div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
+  return `<div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${esc(p.priorita || '—')}</span></div>
     ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
-    <div class="badges">${badgeSito(z, p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}</div></a>`;
+    <div class="badges">${badgeSito(z, p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
+}
+function cardProspect({ zid, z, p }, extra = '') {
+  return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">${testoProspect(z, p, extra)}</div></a>`;
 }
 function vOggi() {
   const tt = tutti(); const ap = tt.filter((x) => aperto(x.p));
@@ -453,14 +455,15 @@ function vGiro() {
     <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${arr.length} tappe pianificate · ${arr.filter((x) => x.p.giro.fatto).length} consegnate</div>
     <div class="lista">${arr.map((x, i) => {
       const ind = x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a || '';
-      return `<div class="card ${x.p.giro.fatto ? 'ok-fatto' : ''}"><div class="riga" style="align-items:flex-start">
-      <span class="num">${x.p.giro.fatto ? '✓' : i + 1}</span>
-      <a href="#p/${zid}/${x.p.id}" style="flex:1;text-decoration:none;min-width:0"><div class="nome">${esc(x.p.nome)}</div>
-      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : '<span class="stato-tappa">Da visitare</span>'}<div class="sub">${esc(x.p.giro.orario || '')} · ${esc(ind.split(',').slice(0, 2).join(','))}</div>
-      ${x.p.report && x.p.report.includi === false ? '<div class="sub">senza report</div>' : ''}</a>
-      <div class="ordine"><button data-su="${zid}|${x.p.id}">↑</button><button data-giu="${zid}|${x.p.id}">↓</button></div></div>
+      const ref = [x.p.referente, x.p.telefono].filter(Boolean).join(' · ');
+      return `<div class="card tappa ${classeCard(x.p)} ${x.p.giro.fatto ? 'ok-fatto' : ''}">
+      <div class="tappa-testa"><span class="num">${x.p.giro.fatto ? '✓' : i + 1}</span>
+      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : '<span class="stato-tappa">Da visitare</span>'}
+      ${x.p.report && x.p.report.includi === false ? '<span class="sub">senza report</span>' : ''}
+      <input type="time" class="btn mini" data-ora="${zid}|${x.p.id}" value="${esc(x.p.giro.orario || '')}" aria-label="Orario">
+      <span class="ordine"><button data-su="${zid}|${x.p.id}" aria-label="Su">↑</button><button data-giu="${zid}|${x.p.id}" aria-label="Giù">↓</button></span></div>
+      <a class="con-mappa" href="#p/${zid}/${x.p.id}">${miniMappa(x.z, x.p)}<div class="card-testo">${testoProspect(x.z, x.p, `<div class="sub ind">${esc(ind.split(',').slice(0, 2).join(','))}${ref ? ' · ' + esc(ref) : ''}</div>`)}</div></a>
       <div class="row mt"><a class="btn mini" href="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(ind)}" target="_blank" rel="noopener">Naviga</a>
-      <input type="time" class="btn mini" data-ora="${zid}|${x.p.id}" value="${esc(x.p.giro.orario || '')}">
       ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Riapri tappa</button>` : `<button class="btn mini segna" data-fatto="${zid}|${x.p.id}">Segna consegnato</button>`}
       <button class="btn mini" data-togli="${zid}|${x.p.id}" title="Togli dal giro">✕</button></div></div>`;
     }).join('')}</div>

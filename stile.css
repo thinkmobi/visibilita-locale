@@ -129,3 +129,12 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600}
 .btn.segna{background:#fff;border:1.5px solid var(--g1);color:var(--g1);font-weight:600}
 .ok-fatto{background:#FAFDFB}.num{background:#fff;color:var(--ink);border:1.5px solid var(--ink)}.ok-fatto .num{background:var(--top-t);color:var(--g1);border-color:var(--g1)}
 .card .row.mt{flex-wrap:nowrap;gap:6px}.card input[type=time].btn{width:104px;padding:4px 6px}
+/* giro: stessa scheda dei prospect, con intestazione della tappa */
+.card.tappa{display:block}
+.tappa-testa{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.tappa-testa .ordine{flex-direction:row;margin-left:auto}
+.tappa-testa .ordine button{width:34px;height:28px}
+.tappa .con-mappa{display:flex;gap:11px;align-items:center;text-decoration:none;color:inherit}
+.tappa .ind{margin-top:5px}
+.tappa-testa input[type=time].btn{width:104px;padding:4px 6px}
+.tappa .row.mt [data-fatto],.tappa .row.mt [data-annulla]{flex:1}
