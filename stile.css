@@ -21,8 +21,10 @@ h2{font-size:20px}h3{font-size:16px}
 /* testata fissa e piena: Safari su iOS 26 tinge la barra di stato con il colore di un elemento fisso in alto,
    invece di sfocare il contenuto che scorre sotto */
 :root{--top-h:calc(52px + env(safe-area-inset-top,0px))}
-html{background:linear-gradient(var(--ink) 50%,var(--bg) 50%)}
+/* Safari 26 tinge la barra di stato con lo sfondo del body: body color testata, contenuto su sfondo chiaro proprio */
+html,body{background:var(--ink)}
 body{padding-top:var(--top-h);min-height:100vh;min-height:100dvh}
+.vista{background:var(--bg);min-height:calc(100dvh - var(--top-h));box-shadow:0 0 0 100vmax var(--bg);clip-path:inset(0 -100vmax)}
 .top{position:fixed;top:0;left:0;right:0;z-index:5;height:var(--top-h);display:flex;align-items:center;justify-content:space-between;
   padding:env(safe-area-inset-top,0px) 16px 0;background:var(--ink);color:#fff}
 .brand{display:flex;align-items:center;gap:10px;font-family:PlexCond;font-size:19px;font-weight:700;font-display:swap}

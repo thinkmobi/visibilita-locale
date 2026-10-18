@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.7.1';
+const VERSIONE = '1.7.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -157,7 +157,9 @@ async function scarica() {
     }
     statoSync('ok', 'Aggiornato ' + oraRoma(Date.now(), { hour: '2-digit', minute: '2-digit' }));
     ST.ultimo = ora();
-    render();
+    // mentre si scrive in un campo la vista non si ricostruisce: si aggiorna appena il campo perde il fuoco
+    const att = document.activeElement;
+    if (att && /^(INPUT|TEXTAREA|SELECT)$/.test(att.tagName) && $('#vista').contains(att)) ST.daRender = true; else render();
   } catch (e) { console.error(e); statoSync('err', e.status === 401 ? 'Token non valido' : 'Non raggiungibile'); }
 }
 
@@ -189,6 +191,7 @@ function render() {
   if (vista === 'p' && a && b) apriProspect(a, b);
   if (vista === 'z' && a) apriZona(a);
 }
+document.addEventListener('focusout', () => setTimeout(() => { if (ST.daRender && !(document.activeElement && $('#vista').contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))) { ST.daRender = false; ST.restaScroll = true; render(); } }, 50));
 window.addEventListener('hashchange', (e) => { const da = (e.oldURL.split('#')[1] || 'oggi'); if (VISTE[da.split('/')[0]]) ST.indietro = '#' + da; if (!/^#(p|z)\//.test(location.hash)) chiudiFoglio(); render(); });
 
 /* ---------- vista: oggi ---------- */
@@ -278,9 +281,8 @@ function benvenuto() {
 }
 
 /* ---------- vista: prospect ---------- */
-function vProspect() {
-  const f = ST.f; const zoneIds = Object.keys(ST.zone);
-  let tt = tutti();
+function filtraProspect() {
+  const f = ST.f; let tt = tutti();
   if (f.stato === 'aperti') tt = tt.filter((x) => aperto(x.p)); else if (f.stato) tt = tt.filter((x) => x.p.stato === f.stato);
   if (f.prio) tt = tt.filter((x) => x.p.priorita === f.prio);
   if (f.zona) tt = tt.filter((x) => x.zid === f.zona);
@@ -288,13 +290,17 @@ function vProspect() {
   if (f.ns) tt = tt.filter((x) => sitoInfo(x.z, x.p).k !== 'ok');
   if (f.pg === 'assente') tt = tt.filter((x) => x.p.pg === 'assente'); else if (f.pg === 'verifica') tt = tt.filter((x) => !x.p.pg);
   if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => (x.p.nome + ' ' + x.p.referente + ' ' + x.p.indirizzo + ' ' + x.p.note).toLowerCase().includes(q)); }
-  tt.sort((a, b) => prioRank(a.p) - prioRank(b.p) || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
+  return tt.sort((a, b) => prioRank(a.p) - prioRank(b.p) || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
+}
+const listaProspect = (tt) => tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>';
+function vProspect() {
+  const f = ST.f; const zoneIds = Object.keys(ST.zone); const tt = filtraProspect();
   const chip = (campo, val, lab, html) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${html || esc(lab)}</button>`;
-  return `<input class="cerca" id="q" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}">
+  return `<input class="cerca" id="q" type="search" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
   <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
   <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button><button class="chip chip-pg ${f.pg === 'assente' ? 'on' : ''}" data-fpg="assente">Assenti su PG (${tutti().filter((x) => aperto(x.p) && x.p.pg === 'assente').length})</button><button class="chip ${f.pg === 'verifica' ? 'on' : ''}" data-fpg="verifica">PG da verificare (${tutti().filter((x) => aperto(x.p) && !x.p.pg).length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
-  <div class="sub" style="margin:4px 0 8px">${tt.length} prospect</div>
-  <div class="lista">${tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>'}</div>`;
+  <div class="sub" style="margin:4px 0 8px" id="contaP">${tt.length} prospect</div>
+  <div class="lista" id="listaP">${listaProspect(tt)}</div>`;
 }
 
 /* ---------- scheda prospect ---------- */
@@ -802,7 +808,9 @@ function legaVista(v) {
     $('#filtroNR').onclick = () => { ST.f.nr = !ST.f.nr; render(); };
     $('#filtroNS').onclick = () => { ST.f.ns = !ST.f.ns; render(); };
     V.querySelectorAll('[data-fpg]').forEach((b) => (b.onclick = () => { ST.f.pg = ST.f.pg === b.dataset.fpg ? '' : b.dataset.fpg; render(); }));
-    const q = $('#q'); q.oninput = () => { ST.f.q = q.value; clearTimeout(ST.timer.q); ST.timer.q = setTimeout(() => { render(); const n = $('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+    const q = $('#q');
+    q.oninput = () => { ST.f.q = q.value; clearTimeout(ST.timer.q); ST.timer.q = setTimeout(() => { const tt = filtraProspect(); $('#contaP').textContent = `${tt.length} prospect`; $('#listaP').innerHTML = listaProspect(tt); }, 120); };
+    q.onkeydown = (e) => { if (e.key === 'Enter') q.blur(); };
   }
   if (v === 'giro') {
     $('#gData').onchange = (e) => { ST.giroData = e.target.value; render(); };
