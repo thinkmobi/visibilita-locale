@@ -206,7 +206,7 @@ function miniMappa(z, p, px = 54) {
 const PORTALI = /(^|\.)(immobiliare\.it|idealista\.it|casa\.it|wikicasa\.it|subito\.it|trovacasa\.net|paginegialle\.it|tripadvisor\.|thefork\.|booking\.com|miodottore\.it|treatwell\.it)$/i;
 const SOCIAL = /(^|\.)(facebook\.com|fb\.com|instagram\.com|linktr\.ee|wa\.me|tiktok\.com|linkedin\.com)$/i;
 const chiaveSito = (u) => (u || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
-const STATO_SITO = { parcheggiato: () => 'Dominio in vendita o scaduto', costruzione: () => 'Sito in costruzione', errore: (v) => `Sito in errore${v.codice ? ' ' + v.codice : ''}`, irraggiungibile: () => 'Sito non raggiungibile' };
+const STATO_SITO = { ssl: () => 'Sito con certificato non valido', parcheggiato: () => 'Dominio in vendita o scaduto', costruzione: () => 'Sito in costruzione', errore: (v) => `Sito in errore${v.codice ? ' ' + v.codice : ''}`, irraggiungibile: (v) => (v.nota && v.nota.startsWith('dominio') ? 'Dominio inesistente o scaduto' : 'Sito non raggiungibile') };
 function verificaSito(z, url) { const s = z && z.id && ST.zone[z.id] && ST.zone[z.id].siti; return s && s.siti ? s.siti[chiaveSito(url)] : null; }
 function sitoInfo(z, p) {
   const url = (p.sito || (z.attivita[p.pid] || {}).w || '').trim();
@@ -215,10 +215,10 @@ function sitoInfo(z, p) {
   const href = /^https?:/i.test(url) ? url : 'https://' + url;
   if (/\.business\.site$/.test(host)) return { k: 'morto', label: 'Sito Google dismesso', href };
   if (SOCIAL.test(host)) return { k: 'social', label: 'Solo social: ' + host.split('.')[0], href };
+  if (PORTALI.test(host)) return { k: 'portale', label: 'Solo portale: ' + host, href };
   const ver = verificaSito(z, url);
-  if (ver && ver.stato !== 'ok') return { k: 'rotto', label: STATO_SITO[ver.stato] ? STATO_SITO[ver.stato](ver) : 'Sito non funzionante', href, ver };
-  if (PORTALI.test(host)) return { k: 'portale', label: 'Solo portale: ' + host, href, ver };
-  return { k: 'ok', label: host + (ver ? ' ✓' : ''), href, ver };
+  if (ver && STATO_SITO[ver.stato]) return { k: 'rotto', label: STATO_SITO[ver.stato](ver), href, ver };
+  return { k: 'ok', label: host + (ver ? (ver.stato === 'ok' ? ' ✓' : ' ?') : ''), href, ver };
 }
 function badgeSito(z, p) {
   const s = sitoInfo(z, p);
@@ -539,7 +539,7 @@ function apriZona(zid) {
     .sort((x, y) => ord === 'rv' ? (y.a.rv || 0) - (x.a.rv || 0) : ord === 'nome' ? x.a.n.localeCompare(y.a.n) : (y.m[ord] - x.m[ord]) || ((y.a.rv || 0) - (x.a.rv || 0)));
   const f = apriFoglio(`${z.meta.quartiere} · ${z.meta.keyword}`, `
   <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${z.punti.length} punti</div>
-  <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${new Date(s.siti.aggiornato).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => v.stato !== 'ok').length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
+  <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${new Date(s.siti.aggiornato).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => STATO_SITO[v.stato]).length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
   <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button></div>
   <div class="eb">Attività trovate</div>
   <div class="filtri">${[['top20', 'Presenza'], ['top3', 'Top 3'], ['rv', 'Recensioni'], ['nome', 'Nome']].map(([k, l]) => `<button class="chip ${ord === k ? 'on' : ''}" data-ord="${k}">${l}</button>`).join('')}

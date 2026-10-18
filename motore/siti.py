@@ -1,6 +1,6 @@
 """Controllo dei siti delle attività di una zona: visita ogni link della scheda Google e scrive zone/<id>/siti.json.
 Uso: python motore/siti.py [zone/<id> ...]   (senza argomenti controlla tutte le zone)
-Stati: ok, parcheggiato (dominio in vendita o scaduto), costruzione, errore (HTTP 4xx/5xx), irraggiungibile.
+Stati: ok, dubbio (blocca i controlli, verificare a mano), ssl (certificato non valido), parcheggiato (dominio in vendita o scaduto),\ncostruzione, errore (HTTP 404/5xx), irraggiungibile (dominio inesistente o server spento).
 Il file è separato da zona.json, così il controllo non entra mai in conflitto con le modifiche fatte dall'app."""
 import json, os, sys, glob, ssl, time, socket, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -25,37 +25,43 @@ def chiave(url):
 
 
 def visita(url):
+    """prova https e http, con e senza verifica del certificato; distingue i siti morti dai blocchi anti-bot"""
     t0 = time.time()
-    tentativi = [url if url.lower().startswith("http") else "https://" + url]
-    if not url.lower().startswith("http"): tentativi.append("http://" + url)
-    ultimo = None
+    base = url.strip()
+    tentativi = [base] if base.lower().startswith("http") else ["https://" + base, "http://" + base]
+    ultimo, ssl_rotto = None, False
     for u in tentativi:
         for verifica_ssl in (True, False):
             ctx = ssl.create_default_context()
             if not verifica_ssl: ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
-            req = urllib.request.Request(u, headers={"User-Agent": UA, "Accept-Language": "it-IT,it;q=0.9"})
+            req = urllib.request.Request(u, headers={"User-Agent": UA, "Accept-Language": "it-IT,it;q=0.9",
+                                                     "Accept": "text/html,application/xhtml+xml"})
             try:
                 with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
                     corpo = r.read(120000).decode("utf-8", "ignore").lower()
-                    finale = r.geturl()
-                    esito = {"stato": "ok", "codice": r.status, "finale": finale, "ms": int((time.time() - t0) * 1000)}
-                    if not verifica_ssl: esito["nota"] = "certificato HTTPS non valido"
+                    esito = {"stato": "ok", "codice": r.status, "finale": r.geturl(), "ms": int((time.time() - t0) * 1000)}
+                    if not verifica_ssl or ssl_rotto:
+                        esito.update(stato="ssl", nota="il sito risponde ma il certificato HTTPS non è valido")
                     if any(k in corpo for k in PARCHEGGIO): esito["stato"] = "parcheggiato"
                     elif any(k in corpo for k in COSTRUZIONE) or len(corpo.strip()) < 400: esito["stato"] = "costruzione"
                     return esito
             except urllib.error.HTTPError as e:
-                if e.code in (403, 429, 503) and verifica_ssl:   # spesso protezioni anti-bot: il sito esiste
+                if e.code in (400, 401, 403, 405, 406, 429, 503):   # protezioni anti-bot: il sito esiste
                     return {"stato": "ok", "codice": e.code, "finale": u, "nota": "risponde ma blocca i controlli automatici",
                             "ms": int((time.time() - t0) * 1000)}
                 ultimo = {"stato": "errore", "codice": e.code, "finale": u}
                 break
-            except ssl.SSLError as e:
-                ultimo = {"stato": "irraggiungibile", "nota": f"SSL: {e.__class__.__name__}"}
-                continue
             except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
                 motivo = getattr(e, "reason", e)
-                if isinstance(motivo, ssl.SSLError): ultimo = {"stato": "irraggiungibile", "nota": "SSL"}; continue
-                ultimo = {"stato": "irraggiungibile", "nota": str(motivo)[:120]}
+                testo = str(motivo)
+                if isinstance(motivo, ssl.SSLError) or isinstance(e, ssl.SSLError) or "CERTIFICATE" in testo.upper():
+                    ssl_rotto = True; ultimo = {"stato": "ssl", "nota": "certificato HTTPS non valido"}; continue
+                if isinstance(motivo, socket.gaierror) or "address associated" in testo or "Name or service" in testo:
+                    return {"stato": "irraggiungibile", "nota": "dominio inesistente o scaduto", "ms": int((time.time() - t0) * 1000)}
+                if "closed connection" in testo or "reset" in testo.lower() or isinstance(motivo, (socket.timeout, TimeoutError)) or "timed out" in testo:
+                    ultimo = {"stato": "dubbio", "nota": "il server chiude la connessione ai controlli automatici: verifica a mano"}
+                    break
+                ultimo = {"stato": "irraggiungibile", "nota": testo[:120]}
                 break
     ultimo = ultimo or {"stato": "irraggiungibile"}
     ultimo["ms"] = int((time.time() - t0) * 1000)
