@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.5';
+const VERSIONE = '1.6.6';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -12,7 +12,7 @@ const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattat
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
-const PRIORITA = ['0 Invisibile', '1 Caldo', '2 Tiepido', '3 Rete'];
+const PRIORITA = ['1 Caldo', '0 Invisibile', '2 Tiepido', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
 const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
 const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt',
@@ -169,8 +169,10 @@ function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Obj
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
 function classeCard(p) { if (p.stato === 'Chiuso vinto') return 'vinto'; if (!aperto(p)) return 'chiuso'; const g = urgenza(p); if (g == null) return ''; return g < 0 ? 'scad' : g <= 2 ? 'vic' : ''; }
 const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
-/* pallino di temperatura: 🟢 più caldo (0 Invisibile, 1 Caldo), 🟠 tiepido, 🔴 meno caldo (reti) */
-const PALLINO = { 0: '🟢', 1: '🟢', 2: '🟠', 3: '🔴' };
+/* 🟢 caldo, 🔵 invisibile (categoria a sé), 🟠 tiepido, ⚪ rete (franchising, gestione separata) */
+const PALLINO = { 1: '🟢', 0: '🔵', 2: '🟠', 3: '⚪' };
+const ORDINE_PRIO = { 1: 0, 0: 1, 2: 2, 3: 3 };
+const prioRank = (p) => ORDINE_PRIO[(p.priorita || '9')[0]] ?? 9;
 const prioTesto = (pr) => (pr ? `${PALLINO[pr[0]] || '⚪'} ${pr}` : '—');
 
 /* ---------- router ---------- */
@@ -279,7 +281,7 @@ function vProspect() {
   if (f.nr) tt = tt.filter((x) => nonRiv(x.z, x.p));
   if (f.ns) tt = tt.filter((x) => sitoInfo(x.z, x.p).k !== 'ok');
   if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => (x.p.nome + ' ' + x.p.referente + ' ' + x.p.indirizzo + ' ' + x.p.note).toLowerCase().includes(q)); }
-  tt.sort((a, b) => (a.p.priorita || '9').localeCompare(b.p.priorita || '9') || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
+  tt.sort((a, b) => prioRank(a.p) - prioRank(b.p) || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
   const chip = (campo, val, lab) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${esc(lab)}</button>`;
   return `<input class="cerca" id="q" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}">
   <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
@@ -623,7 +625,8 @@ function nuovoProspect(zid, pid) {
   const n = Object.keys(z.prospect || {}).map((k) => parseInt(k.slice(1), 10) || 0).reduce((x, y) => Math.max(x, y), 0) + 1;
   const id = 'P' + String(n).padStart(2, '0');
   const rete = RETI.test(a.n);
-  const prio = rete ? '3 Rete' : !m.top20 ? '0 Invisibile' : !m.top3 && (a.rv || 0) >= 20 ? '1 Caldo' : '2 Tiepido';
+  // gli invisibili con almeno 20 recensioni tengono a Google: passano tra i caldi
+  const prio = rete ? '3 Rete' : (a.rv || 0) >= 20 && (!m.top20 || !m.top3) ? '1 Caldo' : !m.top20 ? '0 Invisibile' : '2 Tiepido';
   const gancio = !m.top20 ? `Non compare tra i primi 20 in nessuno dei ${m.N} punti` : `${a.rv || 0} recensioni a ${L.virgola(a.r)}; nel top 3 in ${m.top3} punti su ${m.N}, presente in ${m.top20}`;
   z.prospect[id] = { id, pid, nome: a.n, priorita: prio, stato: 'Da contattare', prossima: rete ? 'Gestione separata franchising' : "Consegnare il report e proporre l'incontro", data_prossima: '',
     referente: '', telefono: a.t || '', email: '', sito: a.w || '', indirizzo: a.a || '', gancio, prodotto: '', valore: 0, segmento: rete ? 'Franchising' : 'Indipendente', note: '',
