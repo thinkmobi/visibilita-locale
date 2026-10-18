@@ -105,21 +105,22 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600}
 .griglia-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12px;color:var(--mute)}.griglia-legenda i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
 .card.con-mappa{display:flex;gap:11px;align-items:center}.card-testo{flex:1;min-width:0}
 .mini{flex:none;display:block;border-radius:7px;background:#F4F5F3;padding:0}.mini.vuota{background:repeating-linear-gradient(45deg,#F4F5F3 0 4px,#E6E9E5 4px 8px);border-radius:7px}
-.allerta{display:flex;gap:11px;align-items:flex-start;background:var(--r2);color:#fff;border-radius:var(--r);padding:12px 14px;margin:12px 0 4px}
-.allerta svg{width:24px;height:24px;flex:none;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;margin-top:1px}
-.allerta b{display:block;font-size:15.5px;line-height:1.25}.allerta span{display:block;font-size:13px;opacity:.92;margin-top:3px}
+.allerta{display:flex;gap:11px;align-items:flex-start;background:var(--neg-t);color:#8E1A17;border:1px solid #F2B8B5;border-left:5px solid var(--r2);border-radius:var(--r);padding:12px 14px;margin:12px 0 4px}
+.allerta svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--r2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;margin-top:1px}
+.allerta b{display:block;font-size:15.5px;line-height:1.25;color:var(--r2)}.allerta span{display:block;font-size:13px;color:#5C2A28;margin-top:3px}
 .box.classifica{margin-top:12px}.box.classifica b{font-family:PlexCond;font-size:17px;display:block;margin-bottom:4px}
 .barra-salva{position:sticky;bottom:0;z-index:3;display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin:18px -16px 0;padding:12px 16px calc(12px + var(--safe-b));background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(24,35,42,.06)}
 .btn.annulla{background:#fff;border:1.5px solid var(--r2);color:var(--r2);font-weight:600}
 .btn.pri{font-weight:600}.btn.pri:disabled{background:var(--soft);border-color:var(--soft);color:var(--mute);opacity:1}
-.badge-nr{display:inline-flex;align-items:center;gap:5px;margin-top:6px;background:var(--r2);color:#fff;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:20px}
-.badge-nr svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-.chip-nr{border-color:var(--r2);color:var(--r2);font-weight:600}.chip-nr.on{background:var(--r2);border-color:var(--r2);color:#fff}
+.badge-nr{display:inline-flex;align-items:center;gap:5px;margin-top:6px;background:var(--neg-t);color:var(--r2);border:1px solid #F2B8B5;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:20px}
+.badge-nr svg{width:13px;height:13px;fill:none;stroke:var(--r2);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.chip-nr{border-color:var(--r2);color:var(--r2);font-weight:600}.chip-nr.on{background:var(--neg-t);border:2px solid var(--r2);color:var(--r2)}
 .badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.badges .badge-nr{margin-top:0}
 .badge-sito{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:20px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .badge-sito svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .s-ok{background:var(--top-t);color:var(--g1);border:1px solid #BFE0C9;cursor:pointer}
 .s-portale,.s-social{background:var(--mid-t);color:#8A6400;border:1px solid #F3DC92;cursor:pointer}
 .s-morto,.s-no{background:#ECEEEB;color:var(--mute);border:1px solid var(--line)}.s-morto{text-decoration:line-through}
-.chip-ns{border-color:var(--o);color:#A85F00;font-weight:600}.chip-ns.on{background:var(--o);border-color:var(--o);color:#fff}
+.chip-ns{border-color:var(--o);color:#A85F00;font-weight:600}.chip-ns.on{background:#FEEBD3;border:2px solid var(--o);color:#A85F00}
 .s-rotto{background:var(--neg-t);color:var(--r2);border:1px solid #F2B8B5;cursor:pointer}
+.giro-oggi{background:var(--top-t)!important;border:1px solid #BFE0C9!important;border-left:5px solid var(--g1)!important;color:var(--ink)!important}.giro-oggi b{color:var(--g1)}

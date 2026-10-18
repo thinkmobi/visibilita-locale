@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.5.0';
+const VERSIONE = '1.5.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -244,7 +244,7 @@ function vOggi() {
   const K = { scad: [scad, 'Azioni scadute', 'c-neg'], vic: [vic, 'Entro 2 giorni', 'c-mid'], senza: [senza, 'Senza prossima azione', 'c-low'], mai: [mai, 'Mai contattati', ''] };
   const sel = ST.f.kpi && K[ST.f.kpi];
   const lista = sel ? sel[0] : ap.filter((x) => x.p.data_prossima && urgenza(x.p) <= 7).sort((a, b) => (a.p.data_prossima > b.p.data_prossima ? 1 : -1));
-  return `${giroOggi.length ? `<a class="card" href="#giro" style="background:var(--top);color:#fff;border:0"><div class="riga"><b>Giro di oggi: ${giroOggi.length} tappe</b><span>→</span></div><div class="sub" style="color:#e3f0ea">${giroOggi.filter((x) => x.p.giro.fatto).length} fatte</div></a>` : ''}
+  return `${giroOggi.length ? `<a class="card giro-oggi" href="#giro"><div class="riga"><b>Giro di oggi: ${giroOggi.length} tappe</b><span>→</span></div><div class="sub">${giroOggi.filter((x) => x.p.giro.fatto).length} fatte</div></a>` : ''}
   <div class="kpi mt">${Object.entries(K).map(([k, [arr, lab, c]]) => `<button data-kpi="${k}" class="${ST.f.kpi === k ? 'sel' : ''}"><b class="${c}">${arr.length}</b><span>${lab}</span></button>`).join('')}</div>
   <div class="eb">${sel ? esc(sel[1]) : 'Prossimi 7 giorni'}</div>
   <div class="lista">${lista.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Niente in scadenza. Buon lavoro.</div>'}</div>`;
