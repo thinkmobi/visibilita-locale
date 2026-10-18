@@ -96,7 +96,9 @@ def zona_da_report(d, rq, esistente=None):
                         "a": q.get("address", ""), "la": num(q.get("lat")), "lo": num(q.get("lng")),
                         "r": num(q.get("rating")), "rv": num(q.get("reviews"), int) or 0,
                         "t": q.get("phone") or "", "w": q.get("display_url") or q.get("url") or "",
-                        "c": bool(q.get("claimed")), "cat": list((q.get("categories") or {}).values())}
+                        # "claimed" di Local Falcon non è affidabile (13 schede su 13 smentite il 18/10/2026):
+                        # si tiene solo un dato verificato a parte (cv), altrimenti resta sconosciuto
+                        "c": vecchio.get("c") if vecchio.get("cv") else None, "cv": vecchio.get("cv"), "cat": list((q.get("categories") or {}).values())}
         punti.append([num(p["lat"]), num(p["lng"]), [q["place_id"] for q in ris]])
     z.update({"meta": meta, "attivita": att, "punti": punti})
     return z
