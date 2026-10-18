@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.8';
+const VERSIONE = '1.7.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -19,7 +19,7 @@ const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'moto
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
-const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '' }, giroData: null, timer: {} };
+const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, timer: {} };
 
 /* ---------- utilità ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -237,6 +237,10 @@ function badgeSito(z, p) {
   const icona = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></svg>';
   return `<span class="badge-sito s-${s.k}" ${s.href ? `data-href="${esc(s.href)}"` : ''}>${icona}${esc(s.label)}</span>`;
 }
+/* presenza su PagineGialle: verifica manuale dal telefono (PagineGialle blocca i server GitHub) */
+const PG = { assente: 'Assente su PG', base: 'PG base', evoluta: 'PG evoluta' };
+const urlPG = (z, p) => `https://www.paginegialle.it/ricerca/${encodeURIComponent(p.nome || '')}/${encodeURIComponent(z.meta.citta || '')}`;
+const badgePG = (p) => (PG[p.pg] ? `<span class="badge-pg pg-${p.pg}"><b>PG</b>${esc(PG[p.pg])}</span>` : '');
 const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false);
 function testoProspect(z, p, extra = '') {
   const g = urgenza(p);
@@ -244,7 +248,7 @@ function testoProspect(z, p, extra = '') {
   return `<div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span></div>
     ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
-    <div class="badges">${badgeSito(z, p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
+    <div class="badges">${badgeSito(z, p)}${badgePG(p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
 }
 function cardProspect({ zid, z, p }, extra = '') {
   return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">${testoProspect(z, p, extra)}</div></a>`;
@@ -282,12 +286,13 @@ function vProspect() {
   if (f.zona) tt = tt.filter((x) => x.zid === f.zona);
   if (f.nr) tt = tt.filter((x) => nonRiv(x.z, x.p));
   if (f.ns) tt = tt.filter((x) => sitoInfo(x.z, x.p).k !== 'ok');
+  if (f.pg === 'assente') tt = tt.filter((x) => x.p.pg === 'assente'); else if (f.pg === 'verifica') tt = tt.filter((x) => !x.p.pg);
   if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => (x.p.nome + ' ' + x.p.referente + ' ' + x.p.indirizzo + ' ' + x.p.note).toLowerCase().includes(q)); }
   tt.sort((a, b) => prioRank(a.p) - prioRank(b.p) || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
   const chip = (campo, val, lab, html) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${html || esc(lab)}</button>`;
   return `<input class="cerca" id="q" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}">
   <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
-  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
+  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button><button class="chip chip-pg ${f.pg === 'assente' ? 'on' : ''}" data-fpg="assente">Assenti su PG (${tutti().filter((x) => aperto(x.p) && x.p.pg === 'assente').length})</button><button class="chip ${f.pg === 'verifica' ? 'on' : ''}" data-fpg="verifica">PG da verificare (${tutti().filter((x) => aperto(x.p) && !x.p.pg).length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
   <div class="sub" style="margin:4px 0 8px">${tt.length} prospect</div>
   <div class="lista">${tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>'}</div>`;
 }
@@ -328,7 +333,9 @@ function apriProspect(zid, id) {
   const inp = (campo, lab, tipo = 'text') => `<label class="f">${lab}<input data-c="${campo}" type="${tipo}" value="${esc(p[campo] ?? '')}"></label>`;
   const html = `
   <div class="riga"><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span><span class="sub">${esc(z.meta.quartiere)} · ${esc(p.segmento || '')} · ${esc(p.id)}</span></div>
-  <div class="badges">${badgeSito(z, p)}</div>
+  <div class="badges">${badgeSito(z, p)}${badgePG(p)}</div>
+  <div class="box pg-box"><div class="riga"><b>PagineGialle</b><a class="btn mini" href="${urlPG(z, p)}" target="_blank" rel="noopener">Cerca su PagineGialle ↗</a></div>
+  <div class="scelte">${Object.entries(PG).map(([k, v]) => `<button class="chip ${p.pg === k ? 'on' : ''}" data-pg="${k}">${k === 'assente' ? 'Assente' : k === 'base' ? 'Scheda base' : 'Scheda evoluta'}</button>`).join('')}</div></div>
   ${a.c === false ? `<div class="allerta"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><div><b>Scheda Google non rivendicata dal titolare</b><span>Nessuno la gestisce: non può rispondere alle recensioni né correggere orari e categoria. È il primo gancio da usare.</span></div></div>` : ''}
   <div class="azioni">
     <a class="btn" ${t ? `href="tel:${tel(t)}"` : 'disabled'}>${ico('tel')}Chiama</a>
@@ -392,6 +399,10 @@ function apriProspect(zid, id) {
   f.querySelectorAll('[data-c]').forEach((el) => el.tagName === 'SELECT' && el.addEventListener('change', () => { D[el.dataset.c] = el.value; segna(); }));
   f.querySelectorAll('[data-r]').forEach((el) => el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => {
     DR[el.dataset.r] = el.type === 'checkbox' ? el.checked : el.value; segna();
+  }));
+  f.querySelectorAll('[data-pg]').forEach((el) => (el.onclick = () => {
+    const v = (D.pg ?? p.pg) === el.dataset.pg ? '' : el.dataset.pg;   // secondo tocco: torna da verificare
+    D.pg = v; f.querySelectorAll('[data-pg]').forEach((b) => b.classList.toggle('on', b.dataset.pg === v)); segna();
   }));
   f.querySelectorAll('[data-quando]').forEach((el) => (el.onclick = () => { const d = piuGiorni(+el.dataset.quando); f.querySelector('[data-c=data_prossima]').value = d; D.data_prossima = d; segna(); }));
   const br = $('#breve', f); if (br) br.oninput = () => { DB = br.value; segna(); };
@@ -768,10 +779,10 @@ async function preparaRepo(out) {
   }
 }
 function esportaCSV(zid) {
-  const righe = [['Zona', 'ID', 'Priorità', 'Agenzia', 'Stato', 'Prossima azione', 'Data prossima azione', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'Indirizzo', 'Gancio', 'Prodotto', 'Valore', 'Segmento', 'Top 3', 'Top 20', 'Recensioni', 'Valutazione', 'Data giro', 'Ordine giro', 'Note']];
+  const righe = [['Zona', 'ID', 'Priorità', 'Agenzia', 'Stato', 'Prossima azione', 'Data prossima azione', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'PagineGialle', 'Indirizzo', 'Gancio', 'Prodotto', 'Valore', 'Segmento', 'Top 3', 'Top 20', 'Recensioni', 'Valutazione', 'Data giro', 'Ordine giro', 'Note']];
   tutti().filter((x) => !zid || x.zid === zid).forEach(({ zid: z0, z, p }) => {
     const a = z.attivita[p.pid] || {}; const m = a.n ? L.metriche(z, p.pid) : {};
-    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r ?? '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
+    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, PG[p.pg] || 'da verificare', p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r ?? '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
   });
   const reg = [['Zona', 'Data', 'ID', 'Agenzia', 'Canale', 'Interlocutore', 'Esito', 'Cosa è emerso', 'Prossima azione', 'Entro il']];
   Object.entries(ST.zone).filter(([k]) => !zid || k === zid).forEach(([k, s]) => Object.values(s.z.registro || {}).filter((r) => !r.del).sort((a, b) => (a.data > b.data ? 1 : -1))
@@ -790,6 +801,7 @@ function legaVista(v) {
     V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; render(); }));
     $('#filtroNR').onclick = () => { ST.f.nr = !ST.f.nr; render(); };
     $('#filtroNS').onclick = () => { ST.f.ns = !ST.f.ns; render(); };
+    V.querySelectorAll('[data-fpg]').forEach((b) => (b.onclick = () => { ST.f.pg = ST.f.pg === b.dataset.fpg ? '' : b.dataset.fpg; render(); }));
     const q = $('#q'); q.oninput = () => { ST.f.q = q.value; clearTimeout(ST.timer.q); ST.timer.q = setTimeout(() => { render(); const n = $('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   }
   if (v === 'giro') {
