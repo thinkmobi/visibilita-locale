@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.5.2';
+const VERSIONE = '1.6.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -239,15 +239,19 @@ function vOggi() {
   const tt = tutti(); const ap = tt.filter((x) => aperto(x.p));
   const scad = ap.filter((x) => urgenza(x.p) < 0), vic = ap.filter((x) => { const g = urgenza(x.p); return g != null && g >= 0 && g <= 2; });
   const senza = ap.filter((x) => !x.p.prossima || !x.p.data_prossima), mai = tt.filter((x) => !registro(x.zid, x.p.id).length && aperto(x.p));
-  const giroOggi = tt.filter((x) => x.p.giro && x.p.giro.data === oggi());
   if (!tt.length) return benvenuto();
   const K = { scad: [scad, 'Azioni scadute', 'c-neg'], vic: [vic, 'Entro 2 giorni', 'c-mid'], senza: [senza, 'Senza prossima azione', 'c-low'], mai: [mai, 'Mai contattati', ''] };
   const sel = ST.f.kpi && K[ST.f.kpi];
-  const lista = sel ? sel[0] : ap.filter((x) => x.p.data_prossima && urgenza(x.p) <= 7).sort((a, b) => (a.p.data_prossima > b.p.data_prossima ? 1 : -1));
-  return `${giroOggi.length ? `<a class="card giro-oggi" href="#giro"><div class="riga"><b>Giro di oggi: ${giroOggi.length} tappe</b><span>→</span></div><div class="sub">${giroOggi.filter((x) => x.p.giro.fatto).length} report consegnati</div></a>` : ''}
-  <div class="kpi mt">${Object.entries(K).map(([k, [arr, lab, c]]) => `<button data-kpi="${k}" class="${ST.f.kpi === k ? 'sel' : ''}"><b class="${c}">${arr.length}</b><span>${lab}</span></button>`).join('')}</div>
-  <div class="eb">${sel ? esc(sel[1]) : 'Prossimi 7 giorni'}</div>
-  <div class="lista">${lista.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Niente in scadenza. Buon lavoro.</div>'}</div>`;
+  const kpi = `<div class="kpi">${Object.entries(K).map(([k, [arr, lab, c]]) => `<button data-kpi="${k}" class="${ST.f.kpi === k ? 'sel' : ''}"><b class="${c}">${arr.length}</b><span>${lab}</span></button>`).join('')}</div>`;
+  if (sel) return `${kpi}<div class="eb">${esc(sel[1])}</div><div class="lista">${sel[0].map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect in questa lista.</div>'}</div>`;
+  // vista predefinita: il giro della data odierna, nell'ordine delle tappe
+  const giro = tt.filter((x) => x.p.giro && x.p.giro.data === oggi()).sort((a, b) => (a.zid + String(a.p.giro.ordine || 99).padStart(3, '0')).localeCompare(b.zid + String(b.p.giro.ordine || 99).padStart(3, '0')));
+  const fatte = giro.filter((x) => x.p.giro.fatto).length;
+  const tappa = (x) => `<div class="riga" style="margin-top:4px"><span class="sub">${esc(x.p.giro.orario || '')}${x.p.giro.orario ? ' · ' : ''}tappa ${x.p.giro.ordine || ''}</span>${x.p.giro.fatto ? '<span class="stato-tappa consegnata">✓ Consegnato</span>' : '<span class="stato-tappa">Da visitare</span>'}</div>`;
+  return `${kpi}
+  <div class="eb">Giro di oggi · ${ggLungo(oggi())}${giro.length ? ` · ${giro.length} tappe · ${fatte} consegnate` : ''}</div>
+  ${giro.length ? `<div class="row" style="margin-bottom:8px"><a class="btn mini" href="#giro">Apri il giro</a></div>` : ''}
+  <div class="lista">${giro.map((x) => cardProspect(x, tappa(x))).join('') || '<div class="vuoto">Nessun giro previsto per oggi.</div>'}</div>`;
 }
 function benvenuto() {
   return `<div class="box"><h2>Benvenuto</h2><p>Nessun dato su questo dispositivo.</p>
@@ -441,7 +445,7 @@ function vGiro() {
   const perZona = {}; tappe.forEach((x) => (perZona[x.zid] = perZona[x.zid] || []).push(x));
   const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
-  return `<div class="row"><input type="date" id="gData" class="cerca" style="flex:1" value="${d}"><button class="btn" id="gAgg">+ Tappa</button></div>
+  return `<div class="row"><input type="date" id="gData" class="cerca" style="flex:1" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
   <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${x}">${ggLungo(x)}</button>`).join('')}</div>
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
@@ -463,6 +467,49 @@ function vGiro() {
     <div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length} analisi · ${Math.ceil(arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length / 2)} fogli A4</span></div>
     <div class="sub">Il PDF esce nell'ordine del giro: taglia la risma a metà e metti la pila inferiore sotto quella superiore.</div>
     <div class="row mt"><button class="btn pri" data-stampa="${zid}">Genera PDF</button><span id="st-${zid}" class="sub"></span></div></div>`).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
+}
+/* sposta in blocco le tappe di un giro a un'altra data: tutte o solo quelle scelte */
+function formSpostaGiro() {
+  const da = ST.giroData;
+  const tappe = tutti().filter((x) => x.p.giro && x.p.giro.data === da).sort((a, b) => (a.zid + String(a.p.giro.ordine).padStart(3, '0')).localeCompare(b.zid + String(b.p.giro.ordine).padStart(3, '0')));
+  const f = apriFoglio('Sposta il giro del ' + ggLungo(da), `
+  <label class="f">Nuova data<input type="date" id="sData" value="${piuGiorni(1, da > oggi() ? da : oggi())}"></label>
+  <label class="f"><input type="checkbox" id="sAz" checked style="display:inline;width:auto;margin-right:6px">Sposta anche la prossima azione e la data "visita entro"</label>
+  <div class="eb">Tappe da spostare</div>
+  <div class="row" style="margin-bottom:6px"><button class="chip" id="sTutte">Tutte</button><button class="chip" id="sNessuna">Nessuna</button></div>
+  <div class="lista">${tappe.map((x) => `<label class="card riga" style="cursor:pointer;opacity:${x.p.giro.fatto ? .55 : 1}"><span style="display:flex;gap:10px;align-items:center;min-width:0">
+    <input type="checkbox" class="sCk" value="${x.zid}|${x.p.id}" ${x.p.giro.fatto ? 'disabled' : 'checked'} style="width:20px;height:20px">
+    <span style="min-width:0"><span class="nome" style="display:block">${x.p.giro.ordine}. ${esc(x.p.nome)}</span><span class="sub">${esc(x.z.meta.quartiere)} · ${esc(x.p.giro.orario || '')}${x.p.giro.fatto ? ' · già consegnato' : ''}</span></span></span></label>`).join('')}</div>
+  <div class="barra-salva"><button class="btn annulla" id="sAnn">Annulla</button><button class="btn pri" id="sOk">Sposta tappe</button></div>`, () => { chiudiFoglio(); render(); });
+  const cks = () => [...f.querySelectorAll('.sCk:not(:disabled)')];
+  $('#sTutte', f).onclick = () => cks().forEach((c) => (c.checked = true));
+  $('#sNessuna', f).onclick = () => cks().forEach((c) => (c.checked = false));
+  $('#sAnn', f).onclick = () => { chiudiFoglio(); render(); };
+  $('#sOk', f).onclick = () => {
+    const a = $('#sData', f).value; const scelte = cks().filter((c) => c.checked).map((c) => c.value.split('|'));
+    if (!a || a === da) { toast('Scegli una data diversa'); return; }
+    if (!scelte.length) { toast('Nessuna tappa selezionata'); return; }
+    const delta = giorni(a) - giorni(da), conAz = $('#sAz', f).checked;
+    const zone = new Set();
+    for (const [zid, id] of scelte) {
+      const z = ST.zone[zid].z, p = z.prospect[id];
+      // le tappe spostate si accodano a quelle già previste nella nuova data
+      const giaLi = Object.values(z.prospect).filter((q) => !q.del && q.giro && q.giro.data === a).length;
+      p.giro = { ...p.giro, data: a, ordine: giaLi + 1 };
+      if (conAz) {
+        if (p.data_prossima === da) p.data_prossima = a;
+        if (p.visita_entro) p.visita_entro = piuGiorni(delta, p.visita_entro);
+      }
+      p.u = ora(); zone.add(zid);
+    }
+    // rinumera le tappe rimaste nella data di partenza
+    for (const zid of zone) {
+      Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === da).sort((x, y) => x.giro.ordine - y.giro.ordine)
+        .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = ora(); } });
+      modificato(zid);
+    }
+    ST.giroData = a; toast(`${scelte.length} tappe spostate al ${gg(a)}`); chiudiFoglio(); render();
+  };
 }
 function spostaTappa(zid, id, dir) {
   const d = ST.giroData;
@@ -733,6 +780,7 @@ function legaVista(v) {
   if (v === 'giro') {
     $('#gData').onchange = (e) => { ST.giroData = e.target.value; render(); };
     $('#gAgg').onclick = scegliTappa;
+    const gs = $('#gSposta'); if (gs) gs.onclick = formSpostaGiro;
     V.querySelectorAll('[data-gd]').forEach((b) => (b.onclick = () => { ST.giroData = b.dataset.gd; render(); }));
     V.querySelectorAll('[data-su],[data-giu]').forEach((b) => (b.onclick = () => { const [zid, id] = (b.dataset.su || b.dataset.giu).split('|'); spostaTappa(zid, id, b.dataset.su ? -1 : 1); }));
     V.querySelectorAll('[data-ora]').forEach((el) => (el.onchange = () => { const [zid, id] = el.dataset.ora.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, orario: el.value } }); }));
