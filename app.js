@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.7';
+const VERSIONE = '1.6.8';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -173,7 +173,9 @@ const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
 const PALLINO = { 1: '🟢', 0: '🔵', 2: '🟠', 3: '⚪' };
 const ORDINE_PRIO = { 1: 0, 2: 1, 0: 2, 3: 3 };
 const prioRank = (p) => ORDINE_PRIO[(p.priorita || '9')[0]] ?? 9;
-const prioTesto = (pr) => (pr ? `${PALLINO[pr[0]] || '⚪'} ${pr}` : '—');
+const prioTesto = (pr) => (pr ? `${PALLINO[pr[0]] || '⚪'} ${pr}` : '—');   // solo dove serve testo puro (menu a tendina)
+const pallino = (pr) => (pr ? `<i class="pt pt${pr[0]}" aria-hidden="true"></i>` : '');   // pallino piccolo disegnato in CSS
+const prioHtml = (pr) => (pr ? `${pallino(pr)}${esc(pr)}` : '—');
 
 /* ---------- router ---------- */
 const VISTE = { oggi: vOggi, prospect: vProspect, giro: vGiro, zone: vZone, cruscotto: vCruscotto, altro: vAltro };
@@ -240,7 +242,7 @@ function testoProspect(z, p, extra = '') {
   const g = urgenza(p);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
   return `<div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
-    <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${esc(prioTesto(p.priorita))}</span></div>
+    <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span></div>
     ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
     <div class="badges">${badgeSito(z, p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
 }
@@ -282,10 +284,10 @@ function vProspect() {
   if (f.ns) tt = tt.filter((x) => sitoInfo(x.z, x.p).k !== 'ok');
   if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => (x.p.nome + ' ' + x.p.referente + ' ' + x.p.indirizzo + ' ' + x.p.note).toLowerCase().includes(q)); }
   tt.sort((a, b) => prioRank(a.p) - prioRank(b.p) || (a.p.data_prossima || '9').localeCompare(b.p.data_prossima || '9'));
-  const chip = (campo, val, lab) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${esc(lab)}</button>`;
+  const chip = (campo, val, lab, html) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${html || esc(lab)}</button>`;
   return `<input class="cerca" id="q" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}">
   <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
-  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, prioTesto(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
+  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
   <div class="sub" style="margin:4px 0 8px">${tt.length} prospect</div>
   <div class="lista">${tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>'}</div>`;
 }
@@ -325,7 +327,7 @@ function apriProspect(zid, id) {
   const sel = (campo, opz, val, et = (o) => o) => `<select data-c="${campo}">${['', ...opz].map((o) => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o ? et(o) : '')}</option>`).join('')}</select>`;
   const inp = (campo, lab, tipo = 'text') => `<label class="f">${lab}<input data-c="${campo}" type="${tipo}" value="${esc(p[campo] ?? '')}"></label>`;
   const html = `
-  <div class="riga"><span class="pill ${prioClasse(p)}">${esc(prioTesto(p.priorita))}</span><span class="sub">${esc(z.meta.quartiere)} · ${esc(p.segmento || '')} · ${esc(p.id)}</span></div>
+  <div class="riga"><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span><span class="sub">${esc(z.meta.quartiere)} · ${esc(p.segmento || '')} · ${esc(p.id)}</span></div>
   <div class="badges">${badgeSito(z, p)}</div>
   ${a.c === false ? `<div class="allerta"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><div><b>Scheda Google non rivendicata dal titolare</b><span>Nessuno la gestisce: non può rispondere alle recensioni né correggere orari e categoria. È il primo gancio da usare.</span></div></div>` : ''}
   <div class="azioni">
@@ -492,7 +494,7 @@ function formSpostaGiro() {
   <div class="row" style="margin-bottom:6px"><button class="chip" id="sTutte">Tutte</button><button class="chip" id="sNessuna">Nessuna</button></div>
   <div class="lista">${tappe.map((x) => `<label class="card riga" style="cursor:pointer;opacity:${x.p.giro.fatto ? .55 : 1}"><span style="display:flex;gap:10px;align-items:center;min-width:0">
     <input type="checkbox" class="sCk" value="${x.zid}|${x.p.id}" ${x.p.giro.fatto ? 'disabled' : 'checked'} style="width:20px;height:20px">
-    <span style="min-width:0"><span class="nome" style="display:block">${x.p.giro.ordine}. ${PALLINO[(x.p.priorita || '9')[0]] || ''} ${esc(x.p.nome)}</span><span class="sub">${esc(x.z.meta.quartiere)} · ${esc(x.p.giro.orario || '')}${x.p.giro.fatto ? ' · già consegnato' : ''}</span></span></span></label>`).join('')}</div>
+    <span style="min-width:0"><span class="nome" style="display:block">${pallino(x.p.priorita)}${x.p.giro.ordine}. ${esc(x.p.nome)}</span><span class="sub">${esc(x.z.meta.quartiere)} · ${esc(x.p.giro.orario || '')}${x.p.giro.fatto ? ' · già consegnato' : ''}</span></span></span></label>`).join('')}</div>
   <div class="barra-salva"><button class="btn annulla" id="sAnn">Annulla</button><button class="btn pri" id="sOk">Sposta tappe</button></div>`, () => { chiudiFoglio(); render(); });
   const cks = () => [...f.querySelectorAll('.sCk:not(:disabled)')];
   $('#sTutte', f).onclick = () => cks().forEach((c) => (c.checked = true));
@@ -723,7 +725,7 @@ function vCruscotto() {
   <div class="eb">Imbuto per stato</div>
   <table class="funnel" style="width:100%">${STATI.map((s) => { const n = tt.filter((x) => x.p.stato === s); return `<tr><td style="width:42%">${s}</td><td style="width:34%"><div class="barra"><i style="width:${n.length / max * 100}%"></i></div></td><td class="mono" style="text-align:right">${n.length}</td><td class="mono" style="text-align:right">${n.length ? eur(n.reduce((a, x) => a + (+x.p.valore || 0), 0)) : ''}</td></tr>`; }).join('')}</table>
   <div class="eb">Aperti per priorità</div>
-  <table class="funnel" style="width:100%">${PRIORITA.map((pr) => `<tr><td>${prioTesto(pr)}</td><td class="mono" style="text-align:right">${tt.filter((x) => x.p.priorita === pr && aperto(x.p)).length}</td></tr>`).join('')}</table>
+  <table class="funnel" style="width:100%">${PRIORITA.map((pr) => `<tr><td>${prioHtml(pr)}</td><td class="mono" style="text-align:right">${tt.filter((x) => x.p.priorita === pr && aperto(x.p)).length}</td></tr>`).join('')}</table>
   <div class="eb">Esiti dei contatti</div>
   <table class="funnel" style="width:100%">${ESITI.map((e) => [e, regs.filter((r) => r.esito === e).length]).filter((x) => x[1]).map(([e, n]) => `<tr><td>${e}</td><td class="mono" style="text-align:right">${n}</td></tr>`).join('') || '<tr><td class="sub">Ancora nessun contatto registrato.</td></tr>'}</table>`;
 }
