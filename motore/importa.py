@@ -12,7 +12,7 @@ PROSSIMO_PASSO = {
     "intro": "Questa pagina mostra solo il risultato. L'analisi completa spiega perché Google mette altre attività davanti alla sua e cosa correggere per recuperare posizioni.",
     "items": [["Concorrenti", "chi la precede, punto per punto"], ["Recensioni", "quante, quanto recenti, cosa dicono"],
               ["Assistenti AI", "se la citano nelle loro risposte"], ["Scheda Google", "le modifiche fatte senza avvisarla"]],
-    "outro": "Le propongo un incontro di mezz'ora: la guardiamo insieme e decidiamo da dove partire."}
+    "outro": "Le propongo un incontro di mezz'ora: guardiamo insieme l'analisi completa e decidiamo da dove partire."}
 
 
 def num(x, tipo=float):

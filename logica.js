@@ -12,10 +12,14 @@
     negozio: ['dal suo negozio', 'dal negozio', 'Davanti al suo negozio'],
     locale: ['dal suo locale', 'dal locale', 'Davanti al suo locale'],
     studio: ['dal suo studio', 'dallo studio', 'Davanti al suo studio'],
+    circolo: ['dal suo circolo', 'dal circolo', 'Davanti al suo circolo'],
   };
   L.LUOGHI = Object.keys(LUOGO);
   L.ordinale = (n) => ORD[n - 1] || n + '°';
-  L.alPosto = (n) => { const o = L.ordinale(n); return (/^[aeiou]/.test(o) ? "all'" : 'al ') + o + ' posto'; };
+  /* posizioni sempre in cifre: "al 6° posto", "all'8° posto"; breve: "al 6°" */
+  const art = (n) => ([8, 11, 18].includes(n) || String(n).startsWith('8') ? "all'" : 'al ');
+  L.alPostoBreve = (n) => `${art(n)}${n}°`;
+  L.alPosto = (n) => `${L.alPostoBreve(n)} posto`;
   L.virgola = (x, d = 1) => (x == null ? '' : Number(x).toFixed(d).replace('.', ','));
 
   L.dist = (la1, lo1, la2, lo2) =>
@@ -81,11 +85,12 @@
     return { pt, righe: out, vicino: L.puntiOrdinati(z, p)[0] };
   };
 
-  L.titoloLista = (z, p) => {
-    const { pt, vicino } = L.classifica(z, p);
-    if (!pt.rank) return 'Al suo posto compaiono';
-    if (pt.i !== vicino.i) return `Chi la precede a ${L.tondo(pt.d)} metri ${luogo(z, p)[1]}`;
-    return 'Chi compare prima di Lei';
+  L.titoloLista = () => 'Chi la precede su Google';
+  /* intestazione della tabella: da quale punto della griglia viene la classifica */
+  L.testaLista = (z, p) => {
+    const { pt } = L.classifica(z, p);
+    const d = L.tondo(pt.d), lu = luogo(z, p);
+    return (d < 30 ? lu[2] : `A ${d} m ${lu[0]}`).toUpperCase();
   };
 
   /* bozza deterministica di titolo e "Cosa vuol dire": zero token, da rifinire a mano */
@@ -102,17 +107,16 @@
     const deboli = sopra.filter((r) => parseInt(r[2], 10) < (a.rv || 0));
     let titolo, cosa;
     if (!m.top20) {
-      titolo = `${a_dist}, chi cerca ${z.meta.frase_kw} su Google non la trova.`;
+      titolo = `${a_dist}, su Google non compare.`;
       cosa = `In nessuno dei ${m.N} punti della zona compare tra i primi 20 risultati.` +
         (a.rv ? ` Le sue ${a.rv} recensioni a ${L.virgola(a.r)} restano fuori da questa ricerca.` : '');
     } else if (!vicino.rank || vicino.rank > 3) {
-      titolo = vicino.rank ? `${a_dist}, Google mette ${nome} ${L.alPosto(vicino.rank)}.`
-        : `${a_dist}, chi cerca ${z.meta.frase_kw} su Google non la trova.`;
+      titolo = vicino.rank ? `${a_dist}, su Google è ${L.alPosto(vicino.rank)}.` : `${a_dist}, su Google non compare.`;
       cosa = (deboli.length ? (deboli.length === 1 ? 'Davanti a Lei compare una concorrente' : `Davanti a Lei compaiono ${deboli.length} concorrenti`) + ` con meno recensioni delle sue ${a.rv}. ` : '') +
         `In ${fuori} punti su ${m.N} (${pf}%) non compare tra i primi 20 risultati.`;
     } else {
-      titolo = `${lu[2]} ${nome} compare ${L.alPosto(vicino.rank)}. A ${L.tondo(pt.d)} metri ` +
-        (pt.rank ? `scende ${L.alPosto(pt.rank)}.` : 'non compare più.');
+      titolo = `${lu[2]} è ${L.alPosto(vicino.rank)}. A ${L.tondo(pt.d)} metri ` +
+        (pt.rank ? `è ${L.alPostoBreve(pt.rank)}.` : 'non compare più.');
       cosa = `La visibilità si ferma vicino alla sede. In ${fuori} punti su ${m.N} (${pf}%) non compare tra i primi 20 risultati.`;
     }
     return { titolo, cosa };
@@ -130,11 +134,13 @@
       title: r.titolo || b.titolo,
       subtitle: r.sottotitolo || `${L.nomeBreve(z, p.pid) || p.nome} · ${L.indirizzoBreve(p.indirizzo || a.a, z.meta.citta)}`,
       stats: [
-        { big: `${m.top3} su ${m.N}`, pct: pc(m.top3) + '%', lab: 'punti in cui compare tra le prime 3', color: L.colorePct(pc(m.top3)) },
-        { big: `${m.top20} su ${m.N}`, pct: pc(m.top20) + '%', lab: 'punti in cui compare tra le prime 20', color: L.colorePct(pc(m.top20)) },
+        { big: `${m.top3} su ${m.N}`, pct: pc(m.top3) + '%', lab: 'punti in cui compare tra le prime 3 posizioni', color: L.colorePct(pc(m.top3)) },
+        { big: `${m.top20} su ${m.N}`, pct: pc(m.top20) + '%', lab: 'punti in cui compare tra le prime 20 posizioni', color: L.colorePct(pc(m.top20)) },
         { big: String(a.rv ?? 0), pct: '', lab: `recensioni, media ${L.virgola(a.r)}`, color: 'ink' },
       ],
       list_title: r.titolo_lista || L.titoloLista(z, p),
+      list_head: L.testaLista(z, p),
+      unclaimed: a.c === false,
       list: L.classifica(z, p).righe,
       cosa: r.cosa || b.cosa,
       method: `Rilevazione del ${z.meta.data_testo} sui risultati pubblici di Google Maps, quelli che vede chiunque faccia una ricerca: ` +
