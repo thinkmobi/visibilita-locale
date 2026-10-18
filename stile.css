@@ -122,3 +122,4 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600}
 .s-portale,.s-social{background:var(--mid-t);color:#8A6400;border:1px solid #F3DC92;cursor:pointer}
 .s-morto,.s-no{background:#ECEEEB;color:var(--mute);border:1px solid var(--line)}.s-morto{text-decoration:line-through}
 .chip-ns{border-color:var(--o);color:#A85F00;font-weight:600}.chip-ns.on{background:var(--o);border-color:var(--o);color:#fff}
+.s-rotto{background:var(--neg-t);color:var(--r2);border:1px solid #F2B8B5;cursor:pointer}

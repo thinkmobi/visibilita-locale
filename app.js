@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.4.0';
+const VERSIONE = '1.5.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -15,9 +15,9 @@ const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Ri
 const PRIORITA = ['0 Invisibile', '1 Caldo', '2 Tiepido', '3 Rete'];
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
 const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
-const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/requirements.txt',
+const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt',
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
-const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml' };
+const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
 const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '' }, giroData: null, timer: {} };
 
@@ -96,7 +96,7 @@ function unisci(loc, rem) {
   for (const [pid, a] of Object.entries(loc.attivita || {})) if (z.attivita[pid] && (a.u || 0) > (z.attivita[pid].u || 0)) z.attivita[pid] = a;
   return z;
 }
-async function salvaLocale(id) { const s = ST.zone[id]; await DB.set('zona:' + id, { z: s.z, sha: s.sha, dirty: s.dirty }); }
+async function salvaLocale(id) { const s = ST.zone[id]; await DB.set('zona:' + id, { z: s.z, sha: s.sha, dirty: s.dirty, siti: s.siti, sitiSha: s.sitiSha }); }
 function modificato(id) {
   const s = ST.zone[id]; s.dirty = true; s.z.u = ora();
   salvaLocale(id); statoSync('att', 'Da salvare');
@@ -133,13 +133,20 @@ async function scarica() {
     const dirs = (await GH.list('zone')).filter((d) => d.type === 'dir');
     for (const d of dirs) {
       const id = d.name;
-      const file = (await GH.list(`zone/${id}`)).find((f) => f.name === 'zona.json');
+      const elenco = await GH.list(`zone/${id}`);
+      const file = elenco.find((f) => f.name === 'zona.json');
       if (!file) continue;
+      const fs = elenco.find((f) => f.name === 'siti.json');
+      if (fs && ST.zone[id] && ST.zone[id].sitiSha !== fs.sha) {
+        const r = await GH.getJSON(`zone/${id}/siti.json`).catch(() => null);
+        if (r) { ST.zone[id].siti = r.data; ST.zone[id].sitiSha = fs.sha; await salvaLocale(id); }
+      }
       const loc = ST.zone[id];
       if (loc && loc.sha === file.sha && !loc.dirty) continue;
       const r = await GH.getJSON(`zone/${id}/zona.json`);
-      if (loc && loc.dirty) { ST.zone[id] = { z: unisci(loc.z, r.data), sha: r.sha, dirty: true }; }
-      else ST.zone[id] = { z: r.data, sha: r.sha, dirty: false };
+      if (loc && loc.dirty) { ST.zone[id] = { ...loc, z: unisci(loc.z, r.data), sha: r.sha, dirty: true }; }
+      else ST.zone[id] = { z: r.data, sha: r.sha, dirty: false, siti: loc && loc.siti, sitiSha: loc && loc.sitiSha };
+      if (!ST.zone[id].siti && fs) { const rs = await GH.getJSON(`zone/${id}/siti.json`).catch(() => null); if (rs) { ST.zone[id].siti = rs.data; ST.zone[id].sitiSha = fs.sha; } }
       await salvaLocale(id);
       if (ST.zone[id].dirty) invia(id);
     }
@@ -198,6 +205,9 @@ function miniMappa(z, p, px = 54) {
 /* stato del sito: dominio proprio, solo portale o social, sito Google dismesso, nessun sito */
 const PORTALI = /(^|\.)(immobiliare\.it|idealista\.it|casa\.it|wikicasa\.it|subito\.it|trovacasa\.net|paginegialle\.it|tripadvisor\.|thefork\.|booking\.com|miodottore\.it|treatwell\.it)$/i;
 const SOCIAL = /(^|\.)(facebook\.com|fb\.com|instagram\.com|linktr\.ee|wa\.me|tiktok\.com|linkedin\.com)$/i;
+const chiaveSito = (u) => (u || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
+const STATO_SITO = { parcheggiato: () => 'Dominio in vendita o scaduto', costruzione: () => 'Sito in costruzione', errore: (v) => `Sito in errore${v.codice ? ' ' + v.codice : ''}`, irraggiungibile: () => 'Sito non raggiungibile' };
+function verificaSito(z, url) { const s = z && z.id && ST.zone[z.id] && ST.zone[z.id].siti; return s && s.siti ? s.siti[chiaveSito(url)] : null; }
 function sitoInfo(z, p) {
   const url = (p.sito || (z.attivita[p.pid] || {}).w || '').trim();
   if (!url) return { k: 'no', label: 'Nessun sito' };
@@ -205,8 +215,10 @@ function sitoInfo(z, p) {
   const href = /^https?:/i.test(url) ? url : 'https://' + url;
   if (/\.business\.site$/.test(host)) return { k: 'morto', label: 'Sito Google dismesso', href };
   if (SOCIAL.test(host)) return { k: 'social', label: 'Solo social: ' + host.split('.')[0], href };
-  if (PORTALI.test(host)) return { k: 'portale', label: 'Solo portale: ' + host, href };
-  return { k: 'ok', label: host, href };
+  const ver = verificaSito(z, url);
+  if (ver && ver.stato !== 'ok') return { k: 'rotto', label: STATO_SITO[ver.stato] ? STATO_SITO[ver.stato](ver) : 'Sito non funzionante', href, ver };
+  if (PORTALI.test(host)) return { k: 'portale', label: 'Solo portale: ' + host, href, ver };
+  return { k: 'ok', label: host + (ver ? ' ✓' : ''), href, ver };
 }
 function badgeSito(z, p) {
   const s = sitoInfo(z, p);
@@ -298,6 +310,7 @@ function apriProspect(zid, id) {
   const inp = (campo, lab, tipo = 'text') => `<label class="f">${lab}<input data-c="${campo}" type="${tipo}" value="${esc(p[campo] ?? '')}"></label>`;
   const html = `
   <div class="riga"><span class="pill ${prioClasse(p)}">${esc(p.priorita || '—')}</span><span class="sub">${esc(z.meta.quartiere)} · ${esc(p.segmento || '')} · ${esc(p.id)}</span></div>
+  <div class="badges">${badgeSito(z, p)}</div>
   ${a.c === false ? `<div class="allerta"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><div><b>Scheda Google non rivendicata dal titolare</b><span>Nessuno la gestisce: non può rispondere alle recensioni né correggere orari e categoria. È il primo gancio da usare.</span></div></div>` : ''}
   <div class="azioni">
     <a class="btn" ${t ? `href="tel:${tel(t)}"` : 'disabled'}>${ico('tel')}Chiama</a>
@@ -526,7 +539,8 @@ function apriZona(zid) {
     .sort((x, y) => ord === 'rv' ? (y.a.rv || 0) - (x.a.rv || 0) : ord === 'nome' ? x.a.n.localeCompare(y.a.n) : (y.m[ord] - x.m[ord]) || ((y.a.rv || 0) - (x.a.rv || 0)));
   const f = apriFoglio(`${z.meta.quartiere} · ${z.meta.keyword}`, `
   <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${z.punti.length} punti</div>
-  <div class="row mt"><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button></div>
+  <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${new Date(s.siti.aggiornato).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => v.stato !== 'ok').length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
+  <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button></div>
   <div class="eb">Attività trovate</div>
   <div class="filtri">${[['top20', 'Presenza'], ['top3', 'Top 3'], ['rv', 'Recensioni'], ['nome', 'Nome']].map(([k, l]) => `<button class="chip ${ord === k ? 'on' : ''}" data-ord="${k}">${l}</button>`).join('')}
   <button class="chip ${ST.f.soloNuove ? 'on' : ''}" id="soloNuove">Solo non in lista</button></div>
@@ -538,6 +552,11 @@ function apriZona(zid) {
   f.querySelectorAll('[data-nuovo]').forEach((b) => (b.onclick = () => nuovoProspect(zid, b.dataset.nuovo)));
   $('#zPdf', f).onclick = async () => { try { const e = await GH.getJSON(`zone/${zid}/stampa/esito.json`); if (e && e.data.file) apriPdf(zid, e.data.file); else toast('Nessun PDF ancora'); } catch (e) { toast(e.message); } };
   $('#zTesti', f).onclick = () => testiZona(zid);
+  $('#zSiti', f).onclick = async () => {
+    if (!GH.ok()) { toast('Serve il collegamento GitHub'); return; }
+    try { await GH.putJSON(`zone/${zid}/siti-richiesta.json`, { creata: new Date().toISOString() }, await GH.sha(`zone/${zid}/siti-richiesta.json`), `Controllo siti ${zid}`);
+      toast('Controllo avviato: 2-5 minuti, poi tocca il pallino in alto', 4500); } catch (e) { toast(e.message); }
+  };
   $('#zEsporta', f).onclick = () => esportaCSV(zid);
 }
 function nuovoProspect(zid, pid) {

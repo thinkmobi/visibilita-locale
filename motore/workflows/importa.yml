@@ -25,6 +25,7 @@ jobs:
               echo "già importata: $dir"; continue
             fi
             python3 motore/importa.py "$rq"
+            [ -f "$dir/zona.json" ] && python3 motore/siti.py "$dir" || true   # controllo dei siti subito dopo l'import
           done
       - name: Salva nel repository
         run: |
