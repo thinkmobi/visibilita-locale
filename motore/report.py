@@ -1,6 +1,6 @@
 """Motore di stampa: due analisi per foglio A4 (210 x 148,5 mm ciascuna), mappa sulla metà sinistra.
-Layout v5 del 18/10/2026 (attività in testata, titoli brevi, avviso scheda non rivendicata,
-prossimo passo a elenco, invito e contatti in un unico box); i dati arrivano da zone/<id>/stampa.json,
+Layout v6 del 18/10/2026 (attività in testata, titoli brevi, avviso scheda non rivendicata,
+prossimo passo con proposta in coda alla descrizione, contatti in un box bordato di verde); i dati arrivano da zone/<id>/stampa.json,
 preparato dall'app. Uso: python motore/report.py zone/<id>/stampa.json"""
 import json, math, sys, os
 from reportlab.lib.pagesizes import A4
@@ -184,7 +184,7 @@ def analysis(c, cfg, X, Y, W, H):
     rx = mx + S + 5 * mm; rw = X + W - M - rx
     avail = body_top - (body_bot + 1.5 * mm)
     k = 1.0
-    for kk in [x / 100 for x in range(120, 84, -2)]:
+    for kk in [x / 100 for x in range(120, 78, -2)]:
         if right_column(c, cfg, rx, rw, body_top, kk, 0, draw=False) <= avail:
             k = kk; break
     need = right_column(c, cfg, rx, rw, body_top, k, 0, draw=False)
@@ -233,7 +233,7 @@ def right_column(c, cfg, rx, rw, top, k, extra, draw):
             ix, iy = rx + 5 * mm, y - hb / 2
             c.setStrokeColor(NEGBR); c.setLineWidth(.9); c.setFillColor(white); c.circle(ix, iy, 2.3 * mm, stroke=1, fill=1)
             c.setFillColor(NEGBR); c.setFont("C", 9); c.drawCentredString(ix, iy - 1.1 * mm, "!")
-        y -= hb + 2.4 * mm + extra * .5
+        y -= hb + 2.4 * mm
     # classifica
     rh = 3.75 * mm * k
     if draw:
@@ -272,45 +272,41 @@ def right_column(c, cfg, rx, rw, top, k, extra, draw):
                 c.setFillColor(INK if me else MUTE); c.setFont("MOM", 6.2 * k); c.drawRightString(rx + rw - sw - .8 * mm, cy - .8 * mm * k, rev)
         y -= rh
     y -= 2.4 * mm + extra
-    # prossimo passo: sfondo bianco, box in evidenza
+    # prossimo passo: titolo, descrizione con la proposta in coda, sotto i contatti in un box bordato di verde
     for hd, body in cfg["blocks"]:
         iw = rw
-        h1 = P(f"<font name='C' size='{10.5 * k:.2f}'>{hd}</font><br/>{body['intro']}", "P", 6.5 * k, 8.4 * k)
+        outro = body["outro"].replace(":<br/>", ": ")
+        h1 = P(f"<font name='C' size='{10.5 * k:.2f}' color='#2E7D5B'>{hd}</font><br/>{body['intro']}<br/><b>{outro}</b>", "P", 6.6 * k, 8.8 * k)
         _, hi = h1.wrap(iw, 80 * mm)
         g = 4 * mm; cw = (iw - g) / 2
         cells = [P(f"<font name='C' size='{7.8 * k:.2f}'>{t}</font>&nbsp;&nbsp;{d}", "P", 6.4 * k, 8.2 * k, INK) for t, d in body["items"]]
         tw = cw - 3.4 * mm
-        rows = [max(cells[j].wrap(tw, 20 * mm)[1] for j in (i, i + 1)) for i in (0, 2)]
-        ch = rows[0] + rows[1] + 1.6 * mm
-        cta = P(body["outro"], "P-B", 7 * k, 8.7 * k, white, TA_CENTER)
-        _, hc = cta.wrap(iw - 6 * mm, 30 * mm)
-        hband = hc + 3.4 * mm
-        hct = 12.4 * mm * min(k, 1.1)
-        tot = hi + 2.2 * mm + ch + 2.6 * mm + hband + hct
+        rows = [max(cells[j].wrap(tw, 20 * mm)[1] for j in (i, i + 1) if j < len(cells)) for i in range(0, len(cells), 2)]
+        ch = sum(rows) + 1.6 * mm * (len(rows) - 1) + 2.6 * mm if cells else 0
+        kk = min(k, 1.1)
+        hct = 14.5 * mm * kk
+        gap = 3.6 * mm
+        tot = hi + gap + ch + hct
         if draw:
             yy = y
-            h1.drawOn(c, rx, yy - hi); yy -= hi + 2.2 * mm
+            h1.drawOn(c, rx, yy - hi); yy -= hi + gap
             for i, p_ in enumerate(cells):
-                cx = rx + (i % 2) * (cw + g); cy = yy - (0 if i < 2 else rows[0] + 1.6 * mm)
+                cx = rx + (i % 2) * (cw + g); cy = yy - sum(rows[r] + 1.6 * mm for r in range(i // 2))
                 c.setFillColor(C_TOP); c.circle(cx + 1.1 * mm, cy - 1.95 * mm * k, .8 * mm, stroke=0, fill=1)
                 p_.wrap(tw, 20 * mm); p_.drawOn(c, cx + 3.4 * mm, cy - p_.height)
-            yy -= ch + 2.6 * mm
-            # proposta e contatti in un unico box: fascia verde sopra, contatti su bianco sotto
-            bt = hband + hct
-            c.setFillColor(white); c.setStrokeColor(C_TOP); c.setLineWidth(.9)
-            c.roundRect(rx, yy - bt, iw, bt, 1.4 * mm, stroke=1, fill=1)
-            c.saveState(); pth = c.beginPath(); pth.roundRect(rx, yy - bt, iw, bt, 1.4 * mm); c.clipPath(pth, stroke=0, fill=0)
-            c.setFillColor(C_TOP); c.rect(rx, yy - hband, iw, hband, stroke=0, fill=1); c.restoreState()
-            cta.drawOn(c, rx + 3 * mm, yy - 1.7 * mm - hc)
-            yy -= hband
-            kk = min(k, 1.1); x0 = rx + 3.6 * mm
-            c.setFillColor(INK); c.setFont("C", 11 * kk); c.drawString(x0, yy - 5 * mm * kk, JOB["firma"]["nome"])
-            t = c.beginText(x0, yy - 8 * mm * kk); t.setFont("MOB", 4.8 * kk); t.setCharSpace(.6); t.setFillColor(MUTE); t.textOut(JOB["firma"]["ruolo"].upper()); t.setCharSpace(0); c.drawText(t)
+            yy -= ch
+            # contatti: sfondo bianco, bordo verde
+            c.setFillColor(white); c.setStrokeColor(C_TOP); c.setLineWidth(1)
+            c.roundRect(rx + .5, yy - hct, iw - 1, hct, 1.6 * mm, stroke=1, fill=1)
+            mid = yy - hct / 2
+            x0 = rx + 4.2 * mm
+            c.setFillColor(INK); c.setFont("C", 12 * kk); c.drawString(x0, mid + .6 * mm, JOB["firma"]["nome"])
+            t = c.beginText(x0, mid - 3 * mm * kk); t.setFont("MOB", 4.8 * kk); t.setCharSpace(.6); t.setFillColor(MUTE); t.textOut(JOB["firma"]["ruolo"].upper()); t.setCharSpace(0); c.drawText(t)
             x1 = rx + iw * .47
-            c.setFillColor(C_TOP); c.setFont("DJ", 8 * kk); c.drawString(x1, yy - 4.6 * mm * kk, "\u260E")
-            c.setFillColor(INK); c.setFont("CS", 9.2 * kk); c.drawString(x1 + 4.2 * mm, yy - 4.6 * mm * kk, JOB["firma"]["telefono"])
-            c.setFillColor(C_TOP); c.setFont("DJ", 8 * kk); c.drawString(x1, yy - 9 * mm * kk, "\u2709")
-            c.setFillColor(INK); c.setFont("CS", 9.2 * kk); c.drawString(x1 + 4.2 * mm, yy - 9 * mm * kk, JOB["firma"]["email"])
+            c.setFillColor(C_TOP); c.setFont("DJ", 8.4 * kk); c.drawString(x1, mid + 1.1 * mm, "\u260E")
+            c.setFillColor(INK); c.setFont("CS", 9.8 * kk); c.drawString(x1 + 4.4 * mm, mid + 1.1 * mm, JOB["firma"]["telefono"])
+            c.setFillColor(C_TOP); c.setFont("DJ", 8.4 * kk); c.drawString(x1, mid - 3.6 * mm, "\u2709")
+            c.setFillColor(INK); c.setFont("CS", 9.8 * kk); c.drawString(x1 + 4.4 * mm, mid - 3.6 * mm, JOB["firma"]["email"])
         y -= tot
     return top - y
 
@@ -346,7 +342,7 @@ def prepara(job, cartella):
     bg = os.path.join(cartella, job["sfondo"]) if job.get("sfondo") else None
     if bg and not os.path.exists(bg): AVVISI.append("sfondo mappa non trovato: stampa senza mappa"); bg = None
     nxt = job["prossimo_passo"]
-    nxt = {"intro": esc(nxt["intro"]), "items": [[esc(a), esc(b)] for a, b in nxt["items"]], "outro": esc(nxt["outro"]).replace(": ", ":<br/>", 1)}
+    nxt = {"intro": esc(nxt["intro"]), "items": [], "outro": esc(nxt["outro"]).replace(": ", ":<br/>", 1)}
     try:
         att = json.load(open(os.path.join(cartella, "zona.json"), encoding="utf-8")).get("attivita", {})
     except Exception:

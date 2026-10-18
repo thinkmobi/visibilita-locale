@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.3';
+const VERSIONE = '1.6.4';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -638,7 +638,6 @@ function testiZona(zid) {
   <label class="f">Chi cerca… (es. un'agenzia immobiliare)<input data-m="frase_kw" value="${esc(m.frase_kw)}"></label>
   <div class="eb">Il prossimo passo</div>
   <label class="f">Introduzione<textarea data-pp="intro">${esc(pp.intro)}</textarea></label>
-  ${pp.items.map((it, i) => `<div class="due"><label class="f">Punto ${i + 1}<input data-it="${i}|0" value="${esc(it[0])}"></label><label class="f">&nbsp;<input data-it="${i}|1" value="${esc(it[1])}"></label></div>`).join('')}
   <label class="f">Invito<textarea data-pp="outro">${esc(pp.outro)}</textarea></label>`, () => apriZona(zid));
   const salva = () => { m.u = ora(); modificato(zid); };
   f.querySelectorAll('[data-m]').forEach((el) => (el.onchange = () => { m[el.dataset.m] = el.value; salva(); }));
