@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.6.6';
+const VERSIONE = '1.6.7';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -12,7 +12,7 @@ const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattat
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
-const PRIORITA = ['1 Caldo', '0 Invisibile', '2 Tiepido', '3 Rete'];   // ordine di lavoro: prima i caldi
+const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
 const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
 const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt',
@@ -169,9 +169,9 @@ function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Obj
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
 function classeCard(p) { if (p.stato === 'Chiuso vinto') return 'vinto'; if (!aperto(p)) return 'chiuso'; const g = urgenza(p); if (g == null) return ''; return g < 0 ? 'scad' : g <= 2 ? 'vic' : ''; }
 const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
-/* 🟢 caldo, 🔵 invisibile (categoria a sé), 🟠 tiepido, ⚪ rete (franchising, gestione separata) */
+/* 🟢 caldo, 🟠 tiepido, 🔵 invisibile (categoria a sé), ⚪ rete (franchising, gestione separata) */
 const PALLINO = { 1: '🟢', 0: '🔵', 2: '🟠', 3: '⚪' };
-const ORDINE_PRIO = { 1: 0, 0: 1, 2: 2, 3: 3 };
+const ORDINE_PRIO = { 1: 0, 2: 1, 0: 2, 3: 3 };
 const prioRank = (p) => ORDINE_PRIO[(p.priorita || '9')[0]] ?? 9;
 const prioTesto = (pr) => (pr ? `${PALLINO[pr[0]] || '⚪'} ${pr}` : '—');
 
