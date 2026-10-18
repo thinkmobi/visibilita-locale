@@ -115,3 +115,10 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600}
 .badge-nr{display:inline-flex;align-items:center;gap:5px;margin-top:6px;background:var(--r2);color:#fff;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:20px}
 .badge-nr svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .chip-nr{border-color:var(--r2);color:var(--r2);font-weight:600}.chip-nr.on{background:var(--r2);border-color:var(--r2);color:#fff}
+.badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.badges .badge-nr{margin-top:0}
+.badge-sito{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:20px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge-sito svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.s-ok{background:var(--top-t);color:var(--g1);border:1px solid #BFE0C9;cursor:pointer}
+.s-portale,.s-social{background:var(--mid-t);color:#8A6400;border:1px solid #F3DC92;cursor:pointer}
+.s-morto,.s-no{background:#ECEEEB;color:var(--mute);border:1px solid var(--line)}.s-morto{text-decoration:line-through}
+.chip-ns{border-color:var(--o);color:#A85F00;font-weight:600}.chip-ns.on{background:var(--o);border-color:var(--o);color:#fff}
