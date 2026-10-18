@@ -43,7 +43,9 @@ def visita(url):
                     if not verifica_ssl or ssl_rotto:
                         esito.update(stato="ssl", nota="il sito risponde ma il certificato HTTPS non è valido")
                     if any(k in corpo for k in PARCHEGGIO): esito["stato"] = "parcheggiato"
-                    elif any(k in corpo for k in COSTRUZIONE) or len(corpo.strip()) < 400: esito["stato"] = "costruzione"
+                    elif any(k in corpo for k in COSTRUZIONE): esito["stato"] = "costruzione"
+                    elif r.status == 202 or len(corpo.strip()) < 400:   # pagine di verifica anti-bot o caricate via JavaScript
+                        esito.update(stato="dubbio", nota="pagina vuota o di verifica automatica: controlla a mano")
                     return esito
             except urllib.error.HTTPError as e:
                 if e.code in (400, 401, 403, 405, 406, 429, 503):   # protezioni anti-bot: il sito esiste
