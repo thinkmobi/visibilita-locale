@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.1';
+const VERSIONE = '1.10.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -143,7 +143,10 @@ function b64dec(b64) { const s = atob(b64.replace(/\n/g, '')); const b = new Uin
 async function bufB64(buf) { const b = new Uint8Array(buf); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
 
 /* ---------- sincronizzazione ---------- */
-function statoSync(stato, msg) { ST.sync = { stato, msg }; const b = $('#sync'); b.className = 'sync ' + stato; $('#syncTxt').textContent = msg; }
+function statoSync(stato, msg) {
+  ST.sync = { stato, msg }; const b = $('#sync'); b.className = 'sync ' + stato; $('#syncTxt').textContent = msg;
+  const fs = $('#fSync'); if (fs) { fs.className = 'sync ' + stato; fs.lastChild.textContent = msg; }   // stesso stato anche dentro la scheda aperta
+}
 const piuRecente = (a, b) => ((a && a.u || 0) >= (b && b.u || 0) ? a : b);
 /* una cancellazione resta tale anche se l'altro dispositivo ha modificato il record dopo */
 const recordUnito = (a, b) => { const w = piuRecente(a, b); return (a && a.del) || (b && b.del) ? { ...w, del: true } : w; };
@@ -171,7 +174,7 @@ function unisci(loc, rem) {
 async function salvaLocale(id) { const s = ST.zone[id]; await DB.set('zona:' + id, { z: s.z, sha: s.sha, dirty: s.dirty, siti: s.siti, sitiSha: s.sitiSha }); }
 function modificato(id) {
   const s = ST.zone[id]; s.dirty = true; s.z.u = ora();
-  salvaLocale(id); statoSync('att', 'Da salvare');
+  salvaLocale(id); statoSync('att', 'In invio');
   clearTimeout(ST.timer['p' + id]); ST.timer['p' + id] = setTimeout(() => invia(id), 1500);
 }
 async function invia(id, tentativi = 3) {
@@ -327,11 +330,15 @@ const PG = { assente: 'Assente su PG', base: 'PG base', evoluta: 'PG evoluta' };
 const urlPG = (z, p) => `https://www.paginegialle.it/ricerca/${encodeURIComponent(p.nome || '')}/${encodeURIComponent(z.meta.citta || '')}`;
 const badgePG = (p) => (PG[p.pg] ? `<span class="badge-pg pg-${p.pg}"><b>PG</b>${esc(PG[p.pg])}</span>` : '');
 const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false);
+// ultimo contatto registrato di un prospect (più recente per data, poi per ora di inserimento)
+const ultimoReg = (z, pid) => Object.values(z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1))[0];
+const esitoBreve = (r) => esitiDi(r).map((e) => esc(e)).join(' · ');
 function testoProspect(z, p, extra = '') {
-  const g = urgenza(p);
+  const g = urgenza(p); const ur = ultimoReg(z, p.id);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
   return `<div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span></div>
+    ${ur ? `<div class="ultimo"><span>Ultimo contatto</span> <b>${esitoBreve(ur)}</b> · ${gg(ur.data)}</div>` : ''}
     ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
     <div class="badges">${badgeSito(z, p)}${badgePG(p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
 }
@@ -411,7 +418,7 @@ const ICO = {
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICO[k]}</svg>`;
 function apriFoglio(titolo, html, onClose) {
   const f = $('#foglio');
-  f.innerHTML = `<div class="testa"><button id="chiudi" aria-label="Chiudi">←</button><h2>${esc(titolo)}</h2></div><div class="corpo">${html}</div>`;
+  f.innerHTML = `<div class="testa"><button id="chiudi" aria-label="Chiudi">←</button><h2>${esc(titolo)}</h2><span id="fSync" class="sync ${ST.sync.stato}" role="status"><span class="dot"></span><span>${esc(ST.sync.msg)}</span></span></div><div class="corpo">${html}</div>`;
   f.hidden = false; document.body.style.overflow = 'hidden';
   $('#chiudi').onclick = () => { if (onClose) onClose(); else history.back(); };
   return f;
@@ -452,6 +459,10 @@ function apriProspect(zid, id) {
     <a class="btn" ${sito ? `href="${/^https?:/.test(sito) ? esc(sito) : 'https://' + esc(sito)}" target="_blank" rel="noopener"` : 'aria-disabled="true"'}>${ico('web')}Sito</a>
   </div>
   <button class="btn pri" style="width:100%" id="registra">Registra contatto</button>
+  ${reg.length ? `<div class="box ultimo-box"><div class="riga"><span class="eb" style="margin:0">Ultimo contatto</span><span class="data">${gg(reg[0].data)} · ${esc(reg[0].canale)}</span></div>
+    <div class="scelte" style="margin-top:6px">${esitiDi(reg[0]).map((e) => `<span class="chip on">${esc(e)}</span>`).join('')}</div>
+    ${reg[0].interlocutore ? `<div class="sub">con ${esc(reg[0].interlocutore)}</div>` : ''}${reg[0].emerso ? `<div>${esc(reg[0].emerso)}</div>` : ''}
+    ${reg.length > 1 ? `<a class="sub" href="#" id="vaiRegistro">Tutti i ${reg.length} contatti ↓</a>` : ''}</div>` : ''}
   <div class="box">
     <div class="eb" style="margin-top:0">Prossima azione</div>
     <label class="f">Stato${sel('stato', STATI, p.stato)}</label>
@@ -466,7 +477,7 @@ function apriProspect(zid, id) {
   <div><b>${m.atrp ? L.virgola(m.atrp) : '—'}</b><span>posizione media</span></div><div><b>${a.rv ?? '—'}</b><span>recensioni ${L.virgola(a.r)}</span></div></div>
   <div class="mt">${minigriglia(z, p.pid)}</div>
   ${an ? `<div class="box classifica"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
-  <div class="eb">Registro (${reg.length})</div>
+  <div class="eb" id="registroP">Registro (${reg.length})</div>
   ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(r.canale)}</span></div>
      ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
   ${an ? `<div class="eb">Report da stampare</div>
@@ -489,9 +500,9 @@ function apriProspect(zid, id) {
   <label class="f">Gancio commerciale<textarea data-c="gancio">${esc(p.gancio)}</textarea></label>
   <label class="f">Note<textarea data-c="note">${esc(p.note)}</textarea></label>
   <div class="row mt"><button class="btn mini" id="elimina" style="color:var(--neg)">Elimina prospect</button></div>
-  <div class="barra-salva"><button class="btn annulla" id="annulla">Annulla</button><button class="btn pri" id="salva" disabled>Salva</button></div>`;
+  <div class="barra-salva"><button class="btn annulla" id="annulla">Chiudi</button><button class="btn pri" id="salva" disabled>Nessuna modifica</button></div>`;
   const D = {}, DR = {}; let DB = null, sporco = false;
-  const segna = () => { sporco = true; $('#salva', f).disabled = false; $('#salva', f).textContent = 'Salva modifiche'; };
+  const segna = () => { sporco = true; $('#salva', f).disabled = false; $('#salva', f).textContent = 'Salva modifiche'; $('#salva', f).classList.remove('fatto'); $('#annulla', f).textContent = 'Annulla'; };
   const salva = () => {
     if (!sporco) return;
     const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
@@ -528,8 +539,15 @@ function apriProspect(zid, id) {
     f.querySelector('[data-r=titolo]').value = b.titolo; f.querySelector('[data-r=cosa]').value = b.cosa;
     Object.assign(DR, { titolo: b.titolo, cosa: b.cosa, titolo_lista: '', punto: null }); segna(); toast('Bozza pronta: premi Salva per tenerla');
   };
-  $('#salva', f).onclick = () => { if (salva() !== false) esci(); };
+  // salva e resta sulla scheda: il pulsante conferma l'ora del salvataggio, l'indicatore in alto mostra l'invio a GitHub
+  $('#salva', f).onclick = () => {
+    if (salva() === false) return;
+    for (const k of Object.keys(D)) delete D[k]; for (const k of Object.keys(DR)) delete DR[k]; DB = null;
+    const b = $('#salva', f); b.disabled = true; b.classList.add('fatto'); b.textContent = '✓ Salvato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+    $('#annulla', f).textContent = 'Chiudi';
+  };
   $('#annulla', f).onclick = annulla;
+  if ($('#vaiRegistro', f)) $('#vaiRegistro', f).onclick = (e) => { e.preventDefault(); $('#registroP', f).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('#registra', f).onclick = () => { if (salva() !== false) formContatto(zid, id); };
   $('#elimina', f).onclick = () => {
     const g = p.giro && p.giro.data ? p.giro.data : '';
@@ -554,7 +572,12 @@ function formContatto(zid, id, preset = {}) {
   proponi();
   const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${(k === 'esito' ? v.esiti.includes(o) : v[k] === o) ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   const disegna = () => {
+    const prec = registro(zid, id)[0];
     const f = apriFoglio('Contatto · ' + p.nome, `
+    ${prec ? `<div class="box ultimo-box" style="margin-top:0"><div class="riga"><span class="eb" style="margin:0">Contatto precedente</span><span class="data">${gg(prec.data)} · ${esc(prec.canale)}</span></div>
+      <div class="scelte" style="margin-top:6px">${esitiDi(prec).map((e) => `<span class="chip on">${esc(e)}</span>`).join('')}</div>
+      ${prec.interlocutore ? `<div class="sub">con ${esc(prec.interlocutore)}</div>` : ''}${prec.emerso ? `<div>${esc(prec.emerso)}</div>` : ''}
+      <div class="sub">Stato ora: ${esc(p.stato)}${p.prossima ? ' · → ' + esc(p.prossima) : ''}</div></div>` : ''}
     <label class="f">Canale</label>${ch('canale', CANALI)}
     <label class="f">Esito <span class="sub">(anche più di uno)</span></label>${ch('esito', ESITI)}
     <div class="due"><label class="f">Data<input id="cData" type="date" value="${v.data}"></label><label class="f">Interlocutore<input id="cInt" value="${esc(v.interlocutore)}"></label></div>

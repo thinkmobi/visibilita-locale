@@ -215,3 +215,11 @@ body.largo .vista{padding-left:max(16px,env(safe-area-inset-left));padding-right
 .tabella .t-ok{background:var(--top-t)!important}.tabella .t-err{background:var(--neg-t)!important}
 .tabella th[data-to=nome]{left:0;z-index:3}
 .tabella input,.tabella select{height:30px;min-height:0;box-shadow:none}
+
+/* ultimo contatto: in scheda e nelle card */
+.ultimo{font-size:13px;margin-top:3px;color:var(--ink)}.ultimo span{color:var(--mute)}
+.ultimo-box{background:var(--home-t);border-color:transparent}
+.ultimo-box .chip{cursor:default;pointer-events:none}
+.foglio .testa .sync{flex:none}
+@media (max-width:380px){.foglio .testa .sync span:last-child{display:none}}
+.barra-salva .btn.pri.fatto:disabled{opacity:1;background:var(--top-t);color:var(--g1);border-color:transparent}
