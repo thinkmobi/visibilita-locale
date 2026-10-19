@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.9.2';
+const VERSIONE = '1.10.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -245,11 +245,12 @@ const pallino = (pr) => (pr ? `<i class="pt pt${pr[0]}" aria-hidden="true"></i>`
 const prioHtml = (pr) => (pr ? `${pallino(pr)}${esc(pr)}` : '—');
 
 /* ---------- router ---------- */
-const VISTE = { oggi: vOggi, prospect: vProspect, giro: vGiro, zone: vZone, cruscotto: vCruscotto, altro: vAltro };
-const TITOLI = { oggi: 'Oggi', prospect: 'Prospect', giro: 'Giro', zone: 'Zone', cruscotto: 'Numeri', altro: 'Profilo' };
+const VISTE = { oggi: vOggi, prospect: vProspect, giro: vGiro, zone: vZone, cruscotto: vCruscotto, tabella: vTabella, altro: vAltro };
+const TITOLI = { oggi: 'Oggi', prospect: 'Prospect', giro: 'Giro', zone: 'Zone', cruscotto: 'Numeri', tabella: 'Tabella', altro: 'Profilo' };
 function render() {
   const [vista, a, b] = (location.hash.slice(1) || 'oggi').split('/');
   document.querySelectorAll('.tab a').forEach((x) => x.classList.toggle('on', x.dataset.t === vista));
+  document.body.classList.toggle('largo', vista === 'tabella');
   $('#titolo').textContent = TITOLI[vista] || 'Visibilità';
   if (VISTE[vista]) {
     const V0 = $('#vista'), scroll = V0.scrollTop, cambio = ST.vistaAttuale !== vista;
@@ -923,7 +924,7 @@ function vCruscotto() {
   const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const max = Math.max(1, ...STATI.map((s) => tt.filter((x) => x.p.stato === s).length));
   const sett = piuGiorni(-6);   // ultimi 7 giorni, oggi compreso
-  return `<div class="kpi">
+  return `<div class="row" style="margin-bottom:10px"><a class="btn mini" href="#tabella">Apri la tabella completa</a></div><div class="kpi">
     <button><b>${tt.length}</b><span>Prospect</span></button>
     <button><b>${regs.length}</b><span>Contatti registrati</span></button>
     <button><b>${regs.filter((r) => r.data >= sett).length}</b><span>Contatti ultimi 7 gg</span></button>
@@ -938,6 +939,83 @@ function vCruscotto() {
   <table class="funnel" style="width:100%">${PRIORITA.map((pr) => `<tr><td>${prioHtml(pr)}</td><td class="mono" style="text-align:right">${tt.filter((x) => x.p.priorita === pr && aperto(x.p)).length}</td></tr>`).join('')}</table>
   <div class="eb">Esiti dei contatti</div>
   <table class="funnel" style="width:100%">${ESITI.map((e) => [e, regs.filter((r) => esitiDi(r).includes(e)).length]).filter((x) => x[1]).map(([e, n]) => `<tr><td>${e}</td><td class="mono" style="text-align:right">${n}</td></tr>`).join('') || '<tr><td class="sub">Ancora nessun contatto registrato.</td></tr>'}</table>`;
+}
+
+/* ---------- vista: tabella (computer) ---------- */
+// tutti i prospect in una tabella: filtri, ordinamento, modifica diretta nelle celle; stessi dati dell'app, nessuna sincronizzazione a parte
+const TCOL = [
+  ['zona', 'Zona'], ['priorita', 'Priorità', 'sel', PRIORITA], ['nome', 'Attività'], ['stato', 'Stato', 'sel', STATI],
+  ['prossima', 'Prossima azione', 'txt'], ['data_prossima', 'Entro', 'data'], ['ultimo', 'Ultimo contatto'], ['ncont', 'Contatti'],
+  ['referente', 'Referente', 'txt'], ['telefono', 'Telefono', 'txt'], ['email', 'Email', 'txt'], ['piva', 'P.IVA', 'txt'],
+  ['pg', 'PagineGialle', 'sel', ['', 'assente', 'base', 'evoluta']], ['prodotto', 'Prodotto', 'sel', ['', ...PRODOTTI]], ['valore', 'Valore €', 'num'],
+  ['giro', 'Giro'], ['note', 'Note', 'txt'],
+];
+function righeTabella() {
+  const f = ST.ft || (ST.ft = { q: '', zona: '', stato: 'aperti', prio: '', solo: '', ord: 'priorita', dir: 1 });
+  let tt = tutti().map((x) => ({ ...x, ultimo: ultimoContatto(x.zid, x.p.id), ncont: registro(x.zid, x.p.id).length }));
+  if (f.stato === 'aperti') tt = tt.filter((x) => aperto(x.p)); else if (f.stato) tt = tt.filter((x) => x.p.stato === f.stato);
+  if (f.zona) tt = tt.filter((x) => x.zid === f.zona);
+  if (f.prio) tt = tt.filter((x) => x.p.priorita === f.prio);
+  if (f.solo === 'scadute') tt = tt.filter((x) => urgenza(x.p) != null && urgenza(x.p) < 0);
+  if (f.solo === 'senza') tt = tt.filter((x) => aperto(x.p) && (!x.p.prossima || !x.p.data_prossima));
+  if (f.solo === 'mai') tt = tt.filter((x) => aperto(x.p) && !x.ncont);
+  if (f.q) { const q = f.q.toLowerCase(); tt = tt.filter((x) => [x.p.nome, x.p.referente, x.p.indirizzo, x.p.note, x.p.telefono, x.p.email, x.p.piva].join(' ').toLowerCase().includes(q)); }
+  const val = (x, k) => k === 'zona' ? x.z.meta.quartiere : k === 'priorita' ? prioRank(x.p) : k === 'stato' ? STATI.indexOf(x.p.stato) : k === 'ultimo' ? x.ultimo : k === 'ncont' ? x.ncont
+    : k === 'valore' ? +x.p.valore || 0 : k === 'giro' ? ((x.p.giro || {}).data || '') + String((x.p.giro || {}).ordine || 0).padStart(3, '0') : String(x.p[k] || '').toLowerCase();
+  const vuoto = (v) => v === '' || v == null;
+  return tt.sort((a, b) => { const va = val(a, f.ord), vb = val(b, f.ord); if (vuoto(va) !== vuoto(vb)) return vuoto(va) ? 1 : -1; return (va > vb ? 1 : va < vb ? -1 : 0) * f.dir || prioRank(a.p) - prioRank(b.p); });
+}
+function cellaTabella(x, [k, , tipo, opz]) {
+  const p = x.p, id = `${x.zid}|${p.id}|${k}`;
+  if (k === 'zona') return esc(x.z.meta.quartiere);
+  if (k === 'nome') return `<a href="#p/${x.zid}/${p.id}" class="t-nome">${esc(p.nome)}</a>`;
+  if (k === 'ultimo') return x.ultimo ? gg(x.ultimo) : '—';
+  if (k === 'ncont') return x.ncont || '';
+  if (k === 'giro') return p.giro && p.giro.data ? `${gg(p.giro.data)} · ${p.giro.ordine || ''}${p.giro.fatto ? ' ✓' : ''}` : '';
+  const v = p[k] ?? '';
+  if (tipo === 'sel') return `<select data-te="${id}">${(opz.includes(v) ? opz : [v, ...opz]).map((o) => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(k === 'pg' ? (PG[o] || (o ? o : 'da verificare')) : o || '—')}</option>`).join('')}</select>`;
+  if (tipo === 'data') return `<input type="date" data-te="${id}" value="${esc(v)}">`;
+  if (tipo === 'num') return `<input type="number" inputmode="decimal" min="0" step="50" data-te="${id}" value="${esc(v)}">`;
+  return `<input data-te="${id}" value="${esc(v)}" ${k === 'note' || k === 'prossima' ? 'class="largo"' : ''}>`;
+}
+function vTabella() {
+  if (!tutti().length) return benvenuto();
+  const tt = righeTabella(); const f = ST.ft; const zoneIds = Object.keys(ST.zone);
+  const tutti0 = tutti(); const ap = tutti0.filter((x) => aperto(x.p));
+  const regs = Object.values(ST.zone).flatMap((s) => Object.values(s.z.registro || {}).filter((r) => !r.del));
+  const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+  const kp = (lab, n, solo, c = '') => `<button data-ts="${solo}" class="${f.solo === solo && solo ? 'sel' : ''}"><b class="${c}">${n}</b><span>${lab}</span></button>`;
+  const opz = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  return `<div class="kpi kpi-t">${kp('Aperti', ap.length, '')}${kp('Azioni scadute', ap.filter((x) => urgenza(x.p) != null && urgenza(x.p) < 0).length, 'scadute', 'c-neg')}${kp('Senza prossima azione', ap.filter((x) => !x.p.prossima || !x.p.data_prossima).length, 'senza', 'c-low')}${kp('Mai contattati', ap.filter((x) => !registro(x.zid, x.p.id).length).length, 'mai')}
+    <button><b>${regs.filter((r) => r.data >= piuGiorni(-6)).length}</b><span>Contatti ultimi 7 gg</span></button>
+    <button><b>${eur(ap.reduce((s0, x) => s0 + (+x.p.valore || 0), 0))}</b><span>Valore aperto</span></button>
+    <button><b class="c-top">${tutti0.filter((x) => x.p.stato === 'Chiuso vinto').length}</b><span>Chiusi vinti</span></button></div>
+  <div class="t-filtri">
+    <input class="cerca" id="tq" type="search" placeholder="Cerca nome, referente, telefono, P.IVA…" value="${esc(f.q)}" autocomplete="off" spellcheck="false">
+    <select id="tStato">${opz([['aperti', 'Aperti'], ['', 'Tutti gli stati'], ...STATI.map((x) => [x, x])], f.stato)}</select>
+    <select id="tPrio">${opz([['', 'Ogni priorità'], ...PRIORITA.map((x) => [x, x])], f.prio)}</select>
+    ${zoneIds.length > 1 ? `<select id="tZona">${opz([['', 'Tutte le zone'], ...zoneIds.map((z) => [z, ST.zone[z].z.meta.quartiere])], f.zona)}</select>` : ''}
+    <button class="btn mini" id="tCsv">Esporta CSV</button>
+  </div>
+  <div class="sub" style="margin:4px 0 8px">${tt.length} prospect${f.solo ? ' · filtro dal riquadro attivo' : ''} · clic sull'intestazione per ordinare · le modifiche si salvano da sole</div>
+  <div class="t-box"><table class="tabella">
+    <thead><tr>${TCOL.map(([k, l]) => `<th data-to="${k}" class="${f.ord === k ? 'ord' : ''}">${esc(l)}${f.ord === k ? (f.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
+    <tbody>${tt.map((x) => `<tr class="${classeCard(x.p)}">${TCOL.map((c) => `<td class="t-${c[0]}">${c[0] === 'priorita' ? pallino(x.p.priorita) : ''}${cellaTabella(x, c)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${TCOL.length}" class="vuoto">Nessun prospect con questi filtri.</td></tr>`}</tbody>
+  </table></div>`;
+}
+function salvaCella(el) {
+  const [zid, id, k] = el.dataset.te.split('|'); const p = ST.zone[zid] && ST.zone[zid].z.prospect[id]; if (!p) return;
+  let v = el.value.trim();
+  if (k === 'referente') v = maiuscole(v, true);
+  if (k === 'piva') { v = pulisciPiva(v); if (v && !pivaValida(v)) { toast('P.IVA non valida: non salvata'); el.value = p.piva || ''; el.classList.add('t-err'); return; } }
+  if (k === 'valore') v = v === '' ? '' : Math.max(0, +v || 0);
+  if (String(p[k] ?? '') === String(v)) return;
+  const campi = { [k]: v };
+  if (k === 'piva') campi.piva_fonte = 'manuale';
+  if (k === 'stato' && CHIUSI.includes(v)) { campi.prossima = ''; campi.data_prossima = ''; }
+  aggiorna(zid, id, campi); el.classList.remove('t-err'); el.classList.add('t-ok'); setTimeout(() => el.classList.remove('t-ok'), 900);
+  if (k === 'referente') el.value = v;
+  ST.daRender = true;   // riepilogo e colori si aggiornano quando esci dalla tabella
 }
 
 /* ---------- vista: altro ---------- */
@@ -997,6 +1075,20 @@ function scaricaFile(testo, nome, tipo) { const url = URL.createObjectURL(new Bl
 function legaVista(v) {
   const V = $('#vista');
   if (v === 'oggi') V.querySelectorAll('[data-kpi]').forEach((b) => (b.onclick = () => { ST.f.kpi = ST.f.kpi === b.dataset.kpi ? '' : b.dataset.kpi; render(); }));
+  if (v === 'tabella') {
+    const f = ST.ft;
+    let tq; $('#tq').oninput = (e) => { f.q = e.target.value; clearTimeout(tq); tq = setTimeout(() => { const pos = e.target.selectionStart; render(); const i = $('#tq'); if (i) { i.focus(); try { i.setSelectionRange(pos, pos); } catch (x) { /* */ } } }, 250); };
+    $('#tStato').onchange = (e) => { f.stato = e.target.value; render(); };
+    $('#tPrio').onchange = (e) => { f.prio = e.target.value; render(); };
+    if ($('#tZona')) $('#tZona').onchange = (e) => { f.zona = e.target.value; render(); };
+    $('#tCsv').onclick = () => esportaCSV();
+    V.querySelectorAll('[data-ts]').forEach((b) => (b.onclick = () => { f.solo = f.solo === b.dataset.ts ? '' : b.dataset.ts; render(); }));
+    V.querySelectorAll('[data-to]').forEach((th) => (th.onclick = () => { if (f.ord === th.dataset.to) f.dir = -f.dir; else { f.ord = th.dataset.to; f.dir = 1; } render(); }));
+    V.querySelectorAll('[data-te]').forEach((el) => {
+      el.addEventListener('change', () => salvaCella(el));
+      if (el.tagName === 'INPUT') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } if (e.key === 'Escape') { const [zid, id, k] = el.dataset.te.split('|'); el.value = ST.zone[zid].z.prospect[id][k] ?? ''; el.blur(); } });
+    });
+  }
   if (v === 'oggi' && $('#oFatti')) $('#oFatti').onclick = () => { ST.f.fatti = !ST.f.fatti; render(); };
   if (v === 'prospect') {
     V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; render(); }));
