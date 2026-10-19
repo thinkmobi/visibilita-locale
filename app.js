@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.9.1';
+const VERSIONE = '1.9.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -521,7 +521,13 @@ function apriProspect(zid, id) {
   $('#salva', f).onclick = () => { if (salva() !== false) esci(); };
   $('#annulla', f).onclick = annulla;
   $('#registra', f).onclick = () => { if (salva() !== false) formContatto(zid, id); };
-  $('#elimina', f).onclick = () => { if (confirm(`Eliminare ${p.nome}? Il registro resta nello storico del repository.`)) { sporco = false; aggiorna(zid, id, { del: true }); location.hash = '#prospect'; } };
+  $('#elimina', f).onclick = () => {
+    const g = p.giro && p.giro.data ? p.giro.data : '';
+    if (!confirm(`Eliminare ${p.nome}?${g ? ` Esce anche dal giro del ${gg(g)} e le altre tappe si rinumerano.` : ''} Il registro resta nello storico del repository.`)) return;
+    sporco = false; aggiorna(zid, id, { del: true });
+    if (g) { rinumera(zid, g); modificato(zid); }   // niente buchi nella numerazione delle tappe e del PDF
+    location.hash = '#prospect';
+  };
 }
 
 /* ---------- registra contatto: un solo modulo aggiorna registro, stato e prossima azione ---------- */
