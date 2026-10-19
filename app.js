@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.0';
+const VERSIONE = '1.10.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -41,12 +41,21 @@ function pivaValida(n) {
 const pulisciPiva = (t) => (t || '').toUpperCase().replace(/^IT/, '').replace(/\D/g, '');
 /* compila da sola la P.IVA dei prospect che non ce l'hanno, se il controllo siti l'ha trovata sul loro sito */
 function pivaDaSiti() {
+  // una P.IVA che compare sui siti di più domini diversi è quella della sede di una rete (es. Tecnocasa): non è dell'agenzia
+  const host = (u) => String(u || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
+  const domini = {};
+  for (const s of Object.values(ST.zone)) for (const p of Object.values(s.z.prospect || {})) {
+    const url = p.sito || (s.z.attivita[p.pid] || {}).w; const ver = verificaSito(s.z, url);
+    if (ver && ver.piva) (domini[ver.piva] = domini[ver.piva] || new Set()).add(host(url));
+  }
+  const diRete = (n) => domini[n] && domini[n].size > 1;
   for (const [zid, s] of Object.entries(ST.zone)) {
     let cambiato = false;
+    for (const p of Object.values(s.z.prospect || {})) if (p.piva_fonte === 'sito' && diRete(p.piva)) { p.piva = ''; delete p.piva_fonte; cambiato = true; }
     for (const p of Object.values(s.z.prospect || {})) {
       if (p.del || p.piva || p.piva_fonte) continue;   // già presente, o svuotata a mano
       const ver = verificaSito(s.z, p.sito || (s.z.attivita[p.pid] || {}).w);
-      if (ver && ver.piva && pivaValida(ver.piva)) { p.piva = ver.piva; p.piva_fonte = 'sito'; cambiato = true; }   // senza toccare u: è un dato derivato, non vince sulle modifiche fatte altrove
+      if (ver && ver.piva && pivaValida(ver.piva) && !diRete(ver.piva)) { p.piva = ver.piva; p.piva_fonte = 'sito'; cambiato = true; }   // senza toccare u: è un dato derivato, non vince sulle modifiche fatte altrove
     }
     if (cambiato) modificato(zid);
   }
