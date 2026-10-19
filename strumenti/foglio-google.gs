@@ -29,15 +29,20 @@ function costruisciTabelle(zone, oggi) {
     });
     reg.forEach((r) => contatti.push([quartiere(z), r.data || '', (z.prospect[r.p] || {}).nome || r.p, r.canale || '', r.interlocutore || '', r.esito || '', r.emerso || '', r.prossima || '', r.entro || '']));
   });
+  // P.IVA trovata sui siti di domini diversi = sede di una rete (es. Tecnocasa): non la mostro
+  const host = (u) => String(u || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
+  const dom = {};
+  tutti.forEach((x) => { if (x.p.piva && x.p.piva_fonte === 'sito') (dom[x.p.piva] = dom[x.p.piva] || {})[host(x.p.sito || x.a.w)] = 1; });
+  const pivaOk = (p) => (p.piva && !(p.piva_fonte === 'sito' && Object.keys(dom[p.piva] || {}).length > 1) ? p.piva : '');
   const aperto = (p) => !CHIUSI.includes(p.stato);
   const ordP = (x) => (({ 1: 0, 2: 1, 0: 2, 3: 3 })[(x.p.priorita || '9')[0]] ?? 9);
   const val = (x) => +x.p.valore || 0;
-  const prospect = [['Zona', 'Priorità', 'Attività', 'Stato', 'Prossima azione', 'Entro', 'Scaduta', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'Partita IVA', 'PagineGialle', 'Prodotto', 'Valore €', 'Giro', 'Tappa', 'Recensioni', 'Valutazione', 'Indirizzo', 'Note', 'ID']];
+  const prospect = [['Zona', 'Priorità', 'Attività', 'Stato', 'Prossima azione', 'Entro', 'Scaduta', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'Partita IVA', 'PagineGialle', 'Prodotto', 'Valore €', 'Giro', 'Tappa n.', 'Stato tappa', 'Recensioni', 'Valutazione', 'Indirizzo', 'Note', 'ID']];
   tutti.slice().sort((a, b) => Number(aperto(b.p)) - Number(aperto(a.p)) || ordP(a) - ordP(b) || String(a.p.data_prossima || '9').localeCompare(String(b.p.data_prossima || '9')))
     .forEach((x) => {
       const p = x.p, g = p.giro || {};
       prospect.push([quartiere(x.z), p.priorita || '', p.nome || '', p.stato || '', p.prossima || '', data(p.data_prossima), aperto(p) && p.data_prossima && p.data_prossima < oggi ? 'sì' : '',
-        data(x.ultimo), x.n || '', p.referente || '', p.telefono || '', p.email || '', p.sito || x.a.w || '', p.piva ? "'" + p.piva : '', PG[p.pg] || 'da verificare',
+        data(x.ultimo), x.n || '', p.referente || '', p.telefono || '', p.email || '', p.sito || x.a.w || '', pivaOk(p) ? "'" + pivaOk(p) : '', PG[p.pg] || 'da verificare',
         p.prodotto || '', +p.valore ? +p.valore : '', data(g.data), g.ordine || '', g.data ? statoTappa(x) : '',
         x.a.rv ?? '', x.a.r ?? '', p.indirizzo || x.a.a || '', p.note || '', p.id]);
     });
