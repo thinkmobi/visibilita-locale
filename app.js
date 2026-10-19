@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.7.3';
+const VERSIONE = '1.8.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -9,7 +9,7 @@ const ESITI = ['Nessuna risposta', 'Segreteria', 'Richiamare', 'Report consegnat
 const prossimoOrdine = (zid, data) => Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).reduce((m, q) => Math.max(m, q.giro.ordine || 0), 0) + 1;
 function rinumera(zid, data) {
   Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).sort((x, y) => (x.giro.ordine || 99) - (y.giro.ordine || 99))
-    .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = ora(); } });
+    .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
 }
 const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Report consegnato': 'Contattato',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
@@ -38,7 +38,7 @@ const TZ = 'Europe/Rome';
 const oggi = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const oraRoma = (d, opz = {}) => new Date(d).toLocaleString('it-IT', { timeZone: TZ, hourCycle: 'h23', ...opz });
 const ORARI = (() => { const o = []; for (let m = 7 * 60; m <= 21 * 60; m += 15) o.push(`${String(m / 60 | 0).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`); return o; })();
-const sceltaOra = (attr, val) => `<select class="btn mini ora" ${attr} aria-label="Orario"><option value="">--:--</option>${(val && !ORARI.includes(val) ? [val, ...ORARI] : ORARI).map((o) => `<option${o === val ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+const sceltaOra = (attr, val) => `<select class="btn mini ora" ${attr} aria-label="Orario"><option value="">--:--</option>${(val && !ORARI.includes(val) ? [val, ...ORARI] : ORARI).map((o) => `<option value="${esc(o)}"${o === val ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
 const piuGiorni = (n, da) => { const d = da ? new Date(da + 'T12:00') : new Date(oggi() + 'T12:00'); d.setDate(d.getDate() + n); return iso(d); };
 const giorni = (s) => (s ? Math.round((new Date(s + 'T12:00') - new Date(oggi() + 'T12:00')) / 864e5) : null);
 const gg = (s) => { if (!s) return ''; const [a, m, d] = s.split('-'); return `${d}/${m}`; };
@@ -97,15 +97,27 @@ async function bufB64(buf) { const b = new Uint8Array(buf); let s = ''; for (let
 /* ---------- sincronizzazione ---------- */
 function statoSync(stato, msg) { ST.sync = { stato, msg }; const b = $('#sync'); b.className = 'sync ' + stato; $('#syncTxt').textContent = msg; }
 const piuRecente = (a, b) => ((a && a.u || 0) >= (b && b.u || 0) ? a : b);
+/* una cancellazione resta tale anche se l'altro dispositivo ha modificato il record dopo */
+const recordUnito = (a, b) => { const w = piuRecente(a, b); return (a && a.del) || (b && b.del) ? { ...w, del: true } : w; };
+/* il timestamp di una modifica supera sempre quello già noto del record: un orologio indietro non fa perdere modifiche */
+const nuovoU = (rec) => Math.max(ora(), ((rec && rec.u) || 0) + 1);
 function unisci(loc, rem) {
   // record per record vince la modifica più recente; nessuna cancellazione fisica (campo del)
   const z = JSON.parse(JSON.stringify(rem));
-  z.meta = piuRecente(loc.meta, rem.meta);
+  // la scansione più recente porta con sé griglia e dati tecnici; i testi modificabili seguono l'ultima modifica
+  const lm = loc.meta || {}, rm = rem.meta || {};
+  const scansioneLoc = (lm.data || '') > (rm.data || '') || ((lm.data || '') === (rm.data || '') && lm.report_key !== rm.report_key && (lm.u || 0) > (rm.u || 0));
+  const base = scansioneLoc ? lm : rm, testi = piuRecente(lm, rm);
+  if (scansioneLoc && loc.punti) z.punti = loc.punti;
+  z.meta = { ...base };
+  for (const k of ['frase_kw', 'centrata', 'luogo', 'prossimo_passo', 'quartiere', 'citta']) if (testi[k] !== undefined) z.meta[k] = testi[k];
+  z.meta.u = Math.max(lm.u || 0, rm.u || 0);
   for (const k of ['prospect', 'registro']) {
     z[k] = { ...(rem[k] || {}) };
-    for (const [id, v] of Object.entries(loc[k] || {})) z[k][id] = piuRecente(v, z[k][id]);
+    for (const [id, v] of Object.entries(loc[k] || {})) z[k][id] = recordUnito(v, z[k][id]);
   }
-  for (const [pid, a] of Object.entries(loc.attivita || {})) if (z.attivita[pid] && (a.u || 0) > (z.attivita[pid].u || 0)) z.attivita[pid] = a;
+  z.attivita = { ...(rem.attivita || {}) };
+  for (const [pid, a] of Object.entries(loc.attivita || {})) if (!z.attivita[pid] || (a.u || 0) > (z.attivita[pid].u || 0)) z.attivita[pid] = a;
   return z;
 }
 async function salvaLocale(id) { const s = ST.zone[id]; await DB.set('zona:' + id, { z: s.z, sha: s.sha, dirty: s.dirty, siti: s.siti, sitiSha: s.sitiSha }); }
@@ -116,22 +128,27 @@ function modificato(id) {
 }
 async function invia(id, tentativi = 3) {
   const s = ST.zone[id];
-  if (!s.dirty) return;
+  if (!s.dirty || (s.inviando && tentativi === 3)) return;
   if (!GH.ok()) { statoSync('loc', 'Solo su questo dispositivo'); return; }
   if (!navigator.onLine) { statoSync('att', 'Offline: in coda'); return; }
+  s.inviando = true;
   try {
     statoSync('att', 'Salvo…');
     const snap = JSON.stringify(s.z);
     const sha = await GH.putJSON(`zone/${id}/zona.json`, s.z, s.sha, `Aggiorna ${id}`);
     s.sha = sha; if (JSON.stringify(s.z) === snap) s.dirty = false;
+    s.inviando = false;
     await salvaLocale(id); statoSync('ok', 'Salvato');
     if (s.dirty) invia(id);
   } catch (e) {
     if ((e.status === 409 || e.status === 422) && tentativi > 0) { // modificato da un altro dispositivo
-      const r = await GH.getJSON(`zone/${id}/zona.json`);
-      if (r) { s.z = unisci(s.z, r.data); s.sha = r.sha; }
-      return invia(id, tentativi - 1);
+      try {
+        const r = await GH.getJSON(`zone/${id}/zona.json`);
+        if (r) { s.z = unisci(s.z, r.data); s.sha = r.sha; }
+        return invia(id, tentativi - 1);
+      } catch (e2) { console.error(e2); }   // rete caduta durante il recupero: si riprova tra 30 secondi
     }
+    s.inviando = false;
     statoSync('err', e.status === 401 ? 'Token non valido' : 'Errore: riprovo');
     console.error(e);
     ST.timer['p' + id] = setTimeout(() => invia(id), 30000);
@@ -155,6 +172,7 @@ async function scarica() {
       }
       const loc = ST.zone[id];
       if (loc && loc.sha === file.sha && !loc.dirty) continue;
+      if (loc && loc.inviando) continue;   // un invio è in corso: la zona si aggiorna al giro successivo
       const r = await GH.getJSON(`zone/${id}/zona.json`);
       if (loc && loc.dirty) { ST.zone[id] = { ...loc, z: unisci(loc.z, r.data), sha: r.sha, dirty: true }; }
       else ST.zone[id] = { z: r.data, sha: r.sha, dirty: false, siti: loc && loc.siti, sitiSha: loc && loc.sitiSha };
@@ -174,7 +192,7 @@ async function scarica() {
 const tutti = () => Object.entries(ST.zone).flatMap(([zid, s]) => Object.values(s.z.prospect || {}).filter((p) => !p.del).map((p) => ({ zid, z: s.z, p })));
 const registro = (zid, pid) => Object.values(ST.zone[zid].z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1));
 const ultimoContatto = (zid, pid) => (registro(zid, pid)[0] || {}).data || '';
-function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi, { u: ora() }); modificato(zid); }
+function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi, { u: nuovoU(p) }); modificato(zid); }
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
 function classeCard(p) { if (p.stato === 'Chiuso vinto') return 'vinto'; if (!aperto(p)) return 'chiuso'; const g = urgenza(p); if (g == null) return ''; return g < 0 ? 'scad' : g <= 2 ? 'vic' : ''; }
 const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
@@ -355,10 +373,10 @@ function apriProspect(zid, id) {
   <div class="scelte">${Object.entries(PG).map(([k, v]) => `<button class="chip ${p.pg === k ? 'on' : ''}" data-pg="${k}">${k === 'assente' ? 'Assente' : k === 'base' ? 'Scheda base' : 'Scheda evoluta'}</button>`).join('')}</div></div>
   ${a.c === false ? `<div class="allerta"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><div><b>Scheda Google non rivendicata dal titolare</b><span>Nessuno la gestisce: non può rispondere alle recensioni né correggere orari e categoria. È il primo gancio da usare.</span></div></div>` : ''}
   <div class="azioni">
-    <a class="btn" ${t ? `href="tel:${tel(t)}"` : 'disabled'}>${ico('tel')}Chiama</a>
-    <a class="btn" ${t ? `href="https://wa.me/${wa(t)}" target="_blank" rel="noopener"` : 'disabled'}>${ico('wa')}WhatsApp</a>
+    <a class="btn" ${t ? `href="tel:${tel(t)}"` : 'aria-disabled="true"'}>${ico('tel')}Chiama</a>
+    <a class="btn" ${t ? `href="https://wa.me/${wa(t)}" target="_blank" rel="noopener"` : 'aria-disabled="true"'}>${ico('wa')}WhatsApp</a>
     <a class="btn" href="${nav}" target="_blank" rel="noopener">${ico('map')}Naviga</a>
-    <a class="btn" ${sito ? `href="${/^https?:/.test(sito) ? esc(sito) : 'https://' + esc(sito)}" target="_blank" rel="noopener"` : 'disabled'}>${ico('web')}Sito</a>
+    <a class="btn" ${sito ? `href="${/^https?:/.test(sito) ? esc(sito) : 'https://' + esc(sito)}" target="_blank" rel="noopener"` : 'aria-disabled="true"'}>${ico('web')}Sito</a>
   </div>
   <button class="btn pri" style="width:100%" id="registra">Registra contatto</button>
   <div class="box">
@@ -377,7 +395,7 @@ function apriProspect(zid, id) {
   ${an ? `<div class="box classifica"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
   <div class="eb">Registro (${reg.length})</div>
   ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(r.canale)}</span></div>
-     ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + gg(r.entro) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
+     ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
   ${an ? `<div class="eb">Report da stampare</div>
   <label class="f"><input type="checkbox" data-r="includi" ${p.report && p.report.includi === false ? '' : 'checked'} style="display:inline;width:auto;margin-right:6px">Includi nella stampa del giro</label>
   <label class="f">Titolo<textarea data-r="titolo">${esc(an.title)}</textarea></label>
@@ -403,7 +421,7 @@ function apriProspect(zid, id) {
     if (!sporco) return;
     const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
     aggiorna(zid, id, campi);
-    const za = ST.zone[zid].z; if (DB !== null && za.attivita[p.pid]) { za.attivita[p.pid].b = DB; za.attivita[p.pid].u = ora(); modificato(zid); }
+    const za = ST.zone[zid].z; if (DB !== null && za.attivita[p.pid]) { za.attivita[p.pid].b = DB; za.attivita[p.pid].u = nuovoU(za.attivita[p.pid]); modificato(zid); }
     sporco = false; toast('Salvato');
   };
   const esci = () => { const dest = ST.indietro || '#prospect'; if (location.hash === dest) { chiudiFoglio(); render(); } else location.hash = dest; };
@@ -424,7 +442,7 @@ function apriProspect(zid, id) {
   f.querySelectorAll('[data-quando]').forEach((el) => (el.onclick = () => { const d = piuGiorni(+el.dataset.quando); f.querySelector('[data-c=data_prossima]').value = d; D.data_prossima = d; segna(); }));
   const br = $('#breve', f); if (br) br.oninput = () => { DB = br.value; segna(); };
   const bz = $('#bozza', f); if (bz) bz.onclick = () => {
-    const b = L.bozza(z, { ...p, report: { ...p.report, titolo: '', cosa: '' } });
+    const b = L.bozza(z, { ...p, report: { ...p.report, ...DR, titolo: '', cosa: '' } });
     f.querySelector('[data-r=titolo]').value = b.titolo; f.querySelector('[data-r=cosa]').value = b.cosa;
     Object.assign(DR, { titolo: b.titolo, cosa: b.cosa, titolo_lista: '', punto: null }); segna(); toast('Bozza pronta: premi Salva per tenerla');
   };
@@ -484,12 +502,12 @@ function vGiro() {
   const date = [...new Set(tt.map((x) => x.p.giro.data))].sort();
   if (!ST.giroData) ST.giroData = date.find((d) => d >= oggi()) || date[date.length - 1] || oggi();
   const d = ST.giroData;
-  const tappe = tt.filter((x) => x.p.giro.data === d).sort((a, b) => (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
+  const tappe = tt.filter((x) => x.p.giro.data === d).sort((a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
   const perZona = {}; tappe.forEach((x) => (perZona[x.zid] = perZona[x.zid] || []).push(x));
   const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
   return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
-  <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${x}">${ggLungo(x)}</button>`).join('')}</div>
+  <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${esc(x)}">${esc(ggLungo(x))}</button>`).join('')}</div>
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
   ${Object.entries(perZona).map(([zid, arr]) => `
@@ -528,7 +546,7 @@ function formSpostaGiro() {
   <div class="eb">Tappe da spostare</div>
   <div class="row" style="margin-bottom:6px"><button class="chip" id="sTutte">Tutte</button><button class="chip" id="sNessuna">Nessuna</button></div>
   <div class="lista">${tappe.map((x) => `<label class="card riga" style="cursor:pointer;opacity:${x.p.giro.fatto ? .55 : 1}"><span style="display:flex;gap:10px;align-items:center;min-width:0">
-    <input type="checkbox" class="sCk" value="${x.zid}|${x.p.id}" ${x.p.giro.fatto ? 'disabled' : 'checked'} style="width:20px;height:20px">
+    <input type="checkbox" class="sCk" value="${esc(x.zid + '|' + x.p.id)}" ${x.p.giro.fatto ? 'disabled' : 'checked'} style="width:20px;height:20px">
     <span style="min-width:0"><span class="nome" style="display:block">${pallino(x.p.priorita)}${x.p.giro.ordine}. ${esc(x.p.nome)}</span><span class="sub">${esc(x.z.meta.quartiere)} · ${esc(x.p.giro.orario || '')}${x.p.giro.fatto ? ' · già consegnato' : ''}</span></span></span></label>`).join('')}</div>
   <div class="barra-salva"><button class="btn annulla" id="sAnn">Annulla</button><button class="btn pri" id="sOk">Sposta tappe</button></div>`, () => { chiudiFoglio(); render(); });
   const cks = () => [...f.querySelectorAll('.sCk:not(:disabled)')];
@@ -549,12 +567,12 @@ function formSpostaGiro() {
         if (p.data_prossima === da) p.data_prossima = a;
         if (p.visita_entro) p.visita_entro = piuGiorni(delta, p.visita_entro);
       }
-      p.u = ora(); zone.add(zid);
+      p.u = nuovoU(p); zone.add(zid);
     }
     // rinumera le tappe rimaste nella data di partenza
     for (const zid of zone) {
       Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === da).sort((x, y) => x.giro.ordine - y.giro.ordine)
-        .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = ora(); } });
+        .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
       modificato(zid);
     }
     ST.giroData = a; toast(`${scelte.length} tappe spostate al ${gg(a)}`); chiudiFoglio(); render();
@@ -565,13 +583,13 @@ function spostaTappa(zid, id, dir) {
   const arr = tutti().filter((x) => x.zid === zid && x.p.giro && x.p.giro.data === d).sort((a, b) => (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
   const i = arr.findIndex((x) => x.p.id === id), j = i + dir; if (j < 0 || j >= arr.length) return;
   [arr[i], arr[j]] = [arr[j], arr[i]];
-  arr.forEach((x, k) => { x.p.giro = { ...x.p.giro, ordine: k + 1 }; x.p.u = ora(); });
+  arr.forEach((x, k) => { if (x.p.giro.ordine !== k + 1) { x.p.giro = { ...x.p.giro, ordine: k + 1 }; x.p.u = nuovoU(x.p); } });
   modificato(zid); ST.restaScroll = true; render();
 }
 function scegliTappa() {
   const tt = tutti().filter((x) => aperto(x.p) && !(x.p.giro && x.p.giro.data === ST.giroData));
   const f = apriFoglio('Aggiungi al giro del ' + gg(ST.giroData), `<input class="cerca" id="tq" placeholder="Cerca…"><div class="lista mt" id="tl"></div>`, () => { chiudiFoglio(); render(); });
-  const lista = () => { const q = $('#tq').value.toLowerCase(); $('#tl').innerHTML = tt.filter((x) => x.p.nome.toLowerCase().includes(q)).map((x) => `<button class="card" style="text-align:left" data-add="${x.zid}|${x.p.id}"><div class="nome">${esc(x.p.nome)}</div><div class="sub">${esc(x.p.stato)} · ${esc(x.z.meta.quartiere)}</div></button>`).join(''); };
+  const lista = () => { const q = $('#tq').value.toLowerCase(); $('#tl').innerHTML = tt.filter((x) => (x.p.nome || '').toLowerCase().includes(q)).map((x) => `<button class="card" style="text-align:left" data-add="${x.zid}|${x.p.id}"><div class="nome">${esc(x.p.nome)}</div><div class="sub">${esc(x.p.stato)} · ${esc(x.z.meta.quartiere)}</div></button>`).join(''); };
   $('#tq').oninput = lista; lista();
   f.addEventListener('click', (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
@@ -606,7 +624,7 @@ async function generaPdf(zid) {
         if (e.data.errore) { out.innerHTML = `<span class="c-neg">${esc(e.data.errore)}</span>`; return; }
         const av = (e.data.avvisi || []).map((a) => `<div class="avviso">${esc(a)}</div>`).join('');
         out.innerHTML = `<button class="btn mini ink" data-pdf="${zid}|${esc(e.data.file)}">Apri ${esc(e.data.file.split('/').pop())}</button>${av}`;
-        const za = ST.zone[zid].z; ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); p.u = ora(); } }); modificato(zid);
+        const za = ST.zone[zid].z; ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); p.u = nuovoU(p); } }); modificato(zid);
         return;
       }
     }
@@ -640,7 +658,7 @@ function apriZona(zid) {
     .filter((r) => !ST.f.soloNuove || !giaP.has(r.pid))
     .sort((x, y) => ord === 'rv' ? (y.a.rv || 0) - (x.a.rv || 0) : ord === 'nome' ? x.a.n.localeCompare(y.a.n) : (y.m[ord] - x.m[ord]) || ((y.a.rv || 0) - (x.a.rv || 0)));
   const f = apriFoglio(`${z.meta.quartiere} · ${z.meta.keyword}`, `
-  <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${z.punti.length} punti</div>
+  <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${(z.punti || []).length} punti</div>
   <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${oraRoma(s.siti.aggiornato, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => STATO_SITO[v.stato]).length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
   <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button></div>
   <div class="eb">Attività trovate</div>
@@ -664,7 +682,8 @@ function apriZona(zid) {
 function nuovoProspect(zid, pid) {
   const z = ST.zone[zid].z, a = z.attivita[pid], m = L.metriche(z, pid);
   const n = Object.keys(z.prospect || {}).map((k) => parseInt(k.slice(1), 10) || 0).reduce((x, y) => Math.max(x, y), 0) + 1;
-  const id = 'P' + String(n).padStart(2, '0');
+  // suffisso casuale: due dispositivi offline non generano lo stesso codice
+  let id; do id = 'P' + String(n).padStart(2, '0') + Math.random().toString(36).slice(2, 4); while (z.prospect && z.prospect[id]);
   const rete = RETI.test(a.n);
   // gli invisibili con almeno 20 recensioni tengono a Google: passano tra i caldi
   const prio = rete ? '3 Rete' : (a.rv || 0) >= 20 && (!m.top20 || !m.top3) ? '1 Caldo' : !m.top20 ? '0 Invisibile' : '2 Tiepido';
@@ -702,7 +721,10 @@ function formScansione() {
     if (!/^[a-f0-9]{15}$/.test(k)) { toast('La report key ha 15 caratteri esadecimali'); return; }
     if (!q || !GH.ok()) { toast(GH.ok() ? 'Manca il quartiere' : 'Serve il collegamento GitHub'); return; }
     const cat = $('#ncat').value.trim() || 'Analisi';
-    const id = `${oggi().replace(/-/g, '').slice(2)}-${slug(q)}-${slug(cat)}`;
+    // stesso giorno, quartiere e categoria ma scansione diversa (es. "Centro" in un'altra città): cartella con suffisso
+    const base = `${oggi().replace(/-/g, '').slice(2)}-${slug(q)}-${slug(cat)}`;
+    let id = base;
+    for (let n = 2; n < 10; n++) { const r = await GH.getJSON(`zone/${id}/richiesta.json`).catch(() => null); if (!r || r.data.report_key === k) break; id = `${base}-${n}`; }
     const rq = { report_key: k, quartiere: q, citta: $('#nc').value.trim(), categoria: cat.replace(/\s+/g, ''), frase_kw: $('#nf').value.trim(), centrata: $('#nce').value.trim() || `su ${q}`, luogo: $('#nl').value, creata: new Date().toISOString() };
     const out = $('#nEsito');
     try {
@@ -718,15 +740,18 @@ async function attendiImport(id, k, out) {
     await new Promise((r) => setTimeout(r, 15000));
     const e = await GH.getJSON(`zone/${id}/importa-esito.json`).catch(() => null);
     if (e && e.data.report_key === k) {
+      if (e.data.stato === 'in_attesa') { if (out) out.textContent = 'Local Falcon sta ancora elaborando la scansione: riprovo da solo.'; continue; }
       if (e.data.stato === 'ok') {
         await scarica();
         const z = ST.zone[id]; if (z && !z.z.meta.luogo) { const rq = await GH.getJSON(`zone/${id}/richiesta.json`); z.z.meta.luogo = rq && rq.data.luogo || 'ufficio'; z.z.meta.u = ora(); modificato(id); }
-        toast(`Zona importata: ${e.data.attivita} attività`); if (out) out.textContent = 'Fatto.'; return;
+        toast(`Zona importata: ${e.data.attivita} attività`); if (out) out.textContent = 'Zona importata.'; return;
       }
       if (out) out.innerHTML = `<span class="c-neg">Import non riuscito: ${esc(e.data.messaggio)}</span>`; else toast('Import non riuscito: ' + e.data.messaggio, 6000);
       return;
     }
   }
+  const msg = 'Import non ancora concluso dopo 12 minuti: controlla Actions su GitHub o riapri Zone più tardi.';
+  if (out) out.innerHTML = `<span class="c-neg">${msg}</span>`; else toast(msg, 6000);
 }
 async function importaFile(files) {
   const json = [...files].find((f) => f.name.endsWith('.json')), png = [...files].find((f) => f.name.endsWith('.png'));
@@ -751,7 +776,7 @@ function vCruscotto() {
   const vinti = tt.filter((x) => x.p.stato === 'Chiuso vinto'), persi = tt.filter((x) => x.p.stato === 'Chiuso perso');
   const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const max = Math.max(1, ...STATI.map((s) => tt.filter((x) => x.p.stato === s).length));
-  const sett = piuGiorni(-7);
+  const sett = piuGiorni(-6);   // ultimi 7 giorni, oggi compreso
   return `<div class="kpi">
     <button><b>${tt.length}</b><span>Prospect</span></button>
     <button><b>${regs.length}</b><span>Contatti registrati</span></button>
@@ -810,14 +835,15 @@ function esportaCSV(zid) {
   const righe = [['Zona', 'ID', 'Priorità', 'Agenzia', 'Stato', 'Prossima azione', 'Data prossima azione', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'PagineGialle', 'Indirizzo', 'Gancio', 'Prodotto', 'Valore', 'Segmento', 'Top 3', 'Top 20', 'Recensioni', 'Valutazione', 'Data giro', 'Ordine giro', 'Note']];
   tutti().filter((x) => !zid || x.zid === zid).forEach(({ zid: z0, z, p }) => {
     const a = z.attivita[p.pid] || {}; const m = a.n ? L.metriche(z, p.pid) : {};
-    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, PG[p.pg] || 'da verificare', p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r ?? '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
+    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, PG[p.pg] || 'da verificare', p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r != null ? L.virgola(a.r) : '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
   });
   const reg = [['Zona', 'Data', 'ID', 'Agenzia', 'Canale', 'Interlocutore', 'Esito', 'Cosa è emerso', 'Prossima azione', 'Entro il']];
   Object.entries(ST.zone).filter(([k]) => !zid || k === zid).forEach(([k, s]) => Object.values(s.z.registro || {}).filter((r) => !r.del).sort((a, b) => (a.data > b.data ? 1 : -1))
     .forEach((r) => reg.push([s.z.meta.quartiere, r.data, r.p, (s.z.prospect[r.p] || {}).nome, r.canale, r.interlocutore, r.esito, r.emerso, r.prossima, r.entro])));
   const csv = (rr) => '﻿' + rr.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
-  scaricaFile(csv(righe), `prospect-${zid || 'tutte'}-${oggi()}.csv`, 'text/csv');
-  setTimeout(() => scaricaFile(csv(reg), `registro-${zid || 'tutte'}-${oggi()}.csv`, 'text/csv'), 600);
+  // un solo file: prospect e, sotto, il registro dei contatti (se c'è)
+  const tutto = reg.length > 1 ? [...righe, [], ['REGISTRO CONTATTI'], ...reg] : righe;
+  scaricaFile(csv(tutto), `prospect-${zid || 'tutte'}-${oggi()}.csv`, 'text/csv');
 }
 function scaricaFile(testo, nome, tipo) { const url = URL.createObjectURL(new Blob([testo], { type: tipo })); const a = document.createElement('a'); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); }
 

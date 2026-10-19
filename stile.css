@@ -177,3 +177,7 @@ select.ora{background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.o
 .pg-evoluta{background:var(--top-t);color:var(--g1);border:1px solid #BFE0C9}
 .pg-box .riga b{font-size:14px}.pg-box .scelte{margin-top:8px}
 .chip-pg{border-color:#E0B21A;color:#8A6400;font-weight:600}.chip-pg.on{background:var(--mid-t);border:2px solid #E0B21A;color:#8A6400}
+/* link d'azione senza dato (telefono o sito mancanti) */
+.btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
+/* testo arancio leggibile su bianco */
+.c-mid{color:#B86E00}

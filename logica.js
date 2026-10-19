@@ -34,8 +34,9 @@
 
   /* metriche di un'attività su tutta la griglia */
   L.metriche = (z, pid) => {
-    const N = z.punti.length;
-    const ranks = z.punti.map(([, , r]) => { const i = r.indexOf(pid); return i < 0 ? null : i + 1; });
+    const punti = z.punti || [];   // zona senza griglia: metriche a zero invece di un errore
+    const N = punti.length;
+    const ranks = punti.map(([, , r]) => { const i = r.indexOf(pid); return i < 0 ? null : i + 1; });
     const trovati = ranks.filter((r) => r);
     return {
       N, ranks,
