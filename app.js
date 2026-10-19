@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.8.1';
+const VERSIONE = '1.9.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -15,6 +15,43 @@ const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattat
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
   'Non interessato': 'Chiuso perso', 'Firmato': 'Chiuso vinto' };
 /* lo stato avanza con l'esito, non torna indietro (es. "Nessuna risposta" su un prospect in trattativa) */
+/* iniziali maiuscole su nomi e referenti: tocca solo le parole tutte minuscole,
+   lascia stare sigle e marchi (RE/MAX, D&D, BERTOLINO) e le forme societarie (s.a.s., srl) */
+const MINORI = new Set(['di', 'da', 'del', 'della', 'dello', 'dei', 'degli', 'delle', 'e', 'ed', 'il', 'la', 'lo', 'le', 'gli', 'in', 'a', 'al', 'alla', 'per', 'con', 'su', 'sul', 'sulla', 'dal', 'dalla', 'dai', 'dalle', 'nel', 'nella', 'nei', 'tra', 'fra', 'ai', 'agli', 'alle']);
+const SOCIETA = /^(s\.?r\.?l\.?s?|s\.?a\.?s\.?|s\.?n\.?c\.?|s\.?p\.?a\.?|s\.s\.|d\.i\.)$/i;
+const ELISE = /^(dell|all|nell|sull|dall|coll|l)['’]/;   // dell'arte, all'angolo: la preposizione resta minuscola
+/* persona = true per referenti e interlocutori: Di Stefano, Della Valle, D'Amico (uso anagrafico) */
+function maiuscole(t, persona = false) {
+  if (!t) return t;
+  return t.replace(/\s+/g, ' ').trim().split(' ').map((w, i) => {
+    if (w !== w.toLowerCase() || (i > 0 && SOCIETA.test(w))) return w;
+    if (/&/.test(w) && w.length <= 5) return w.toUpperCase();   // b&b, d&d
+    if (!persona && i > 0 && MINORI.has(w)) return w;
+    const su = w.replace(/(^|['’\-])(\p{L})/gu, (m, sep, c) => sep + c.toUpperCase());
+    return !persona && i > 0 && ELISE.test(w) ? su[0].toLowerCase() + su.slice(1) : su;
+  }).join(' ');
+}
+/* partita IVA: controllo della cifra finale (stesso algoritmo dell'Agenzia delle Entrate) */
+function pivaValida(n) {
+  if (!/^\d{11}$/.test(n || '') || /^0+$/.test(n)) return false;
+  let s = 0;
+  for (let i = 0; i < 10; i++) { let d = +n[i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } s += d; }
+  return (10 - (s % 10)) % 10 === +n[10];
+}
+const pulisciPiva = (t) => (t || '').toUpperCase().replace(/^IT/, '').replace(/\D/g, '');
+/* compila da sola la P.IVA dei prospect che non ce l'hanno, se il controllo siti l'ha trovata sul loro sito */
+function pivaDaSiti() {
+  for (const [zid, s] of Object.entries(ST.zone)) {
+    let cambiato = false;
+    for (const p of Object.values(s.z.prospect || {})) {
+      if (p.del || p.piva || p.piva_fonte) continue;   // già presente, o svuotata a mano
+      const ver = verificaSito(s.z, p.sito || (s.z.attivita[p.pid] || {}).w);
+      if (ver && ver.piva && pivaValida(ver.piva)) { p.piva = ver.piva; p.piva_fonte = 'sito'; cambiato = true; }   // senza toccare u: è un dato derivato, non vince sulle modifiche fatte altrove
+    }
+    if (cambiato) modificato(zid);
+  }
+}
+const esitiDi = (r) => r.esiti || (r.esito ? r.esito.split(' · ') : []);
 const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
@@ -182,6 +219,7 @@ async function scarica() {
       await salvaLocale(id);
       if (ST.zone[id].dirty) invia(id);
     }
+    pivaDaSiti();
     statoSync('ok', 'Aggiornato ' + oraRoma(Date.now(), { hour: '2-digit', minute: '2-digit' }));
     ST.ultimo = ora();
     // mentre si scrive in un campo la vista non si ricostruisce: si aggiorna appena il campo perde il fuoco
@@ -213,12 +251,19 @@ function render() {
   const [vista, a, b] = (location.hash.slice(1) || 'oggi').split('/');
   document.querySelectorAll('.tab a').forEach((x) => x.classList.toggle('on', x.dataset.t === vista));
   $('#titolo').textContent = TITOLI[vista] || 'Visibilità';
-  if (VISTE[vista]) { const scroll = window.scrollY; $('#vista').innerHTML = VISTE[vista](); legaVista(vista); if (ST.restaScroll) window.scrollTo(0, scroll); }
+  if (VISTE[vista]) {
+    const V0 = $('#vista'), scroll = V0.scrollTop, cambio = ST.vistaAttuale !== vista;
+    V0.innerHTML = VISTE[vista](); legaVista(vista);
+    V0.scrollTop = ST.restaScroll || !cambio ? scroll : 0;   // cambiando scheda si riparte dall'alto
+    ST.vistaAttuale = vista;
+  }
   ST.restaScroll = false;
   if (vista === 'p' && a && b) apriProspect(a, b);
   if (vista === 'z' && a) apriZona(a);
 }
 document.addEventListener('focusout', () => setTimeout(() => { if (ST.daRender && $('#foglio').hidden && !(document.activeElement && $('#vista').contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))) { ST.daRender = false; ST.restaScroll = true; render(); } }, 50));
+// iOS: con html/body bloccati, la tastiera a volte lascia la pagina spostata in alto
+document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) { if (window.scrollY) window.scrollTo(0, 0); } }, 50));
 window.addEventListener('hashchange', (e) => { const da = (e.oldURL.split('#')[1] || 'oggi'); if (VISTE[da.split('/')[0]]) ST.indietro = '#' + da; if (!/^#(p|z)\//.test(location.hash)) chiudiFoglio(); render(); });
 
 /* ---------- vista: oggi ---------- */
@@ -409,6 +454,8 @@ function apriProspect(zid, id) {
   ` : ''}
   <div class="eb">Dati</div>
   ${inp('nome', 'Nome')}${inp('referente', 'Referente')}
+  <label class="f">Partita IVA<input data-c="piva" inputmode="numeric" autocomplete="off" maxlength="24" value="${esc(p.piva || '')}"></label>
+  <div class="sub" id="pivaNota">${p.piva ? (pivaValida(p.piva) ? `✓ P.IVA valida${p.piva_fonte === 'sito' ? ' · trovata sul sito' : ''}` : '<span class="c-neg">P.IVA non valida: controlla le cifre</span>') : 'Si compila da sola se è scritta sul sito; altrimenti inseriscila a mano.'}</div>
   <div class="due">${inp('telefono', 'Telefono', 'tel')}${inp('email', 'Email', 'email')}</div>
   ${inp('indirizzo', 'Indirizzo')}${inp('sito', 'Sito')}
   <div class="due"><label class="f">Prodotto proposto${sel('prodotto', PRODOTTI, p.prodotto)}</label>${inp('valore', 'Valore proposta (€)', 'number')}</div>
@@ -422,6 +469,12 @@ function apriProspect(zid, id) {
   const salva = () => {
     if (!sporco) return;
     const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
+    if ('nome' in campi) campi.nome = maiuscole(campi.nome);
+    if ('referente' in campi) campi.referente = maiuscole(campi.referente, true);
+    if ('piva' in campi) {
+      campi.piva = pulisciPiva(campi.piva); campi.piva_fonte = 'manuale';
+      if (campi.piva && !pivaValida(campi.piva)) { toast('P.IVA non valida: correggila o lasciala vuota'); const el = $('[data-c=piva]'); if (el) el.focus(); return false; }
+    }
     aggiorna(zid, id, campi);
     const za = ST.zone[zid].z; if (DB !== null && za.attivita[p.pid]) { za.attivita[p.pid].b = DB; za.attivita[p.pid].u = nuovoU(za.attivita[p.pid]); modificato(zid); }
     sporco = false; toast('Salvato');
@@ -431,6 +484,7 @@ function apriProspect(zid, id) {
   const f = apriFoglio(p.nome, html, annulla);
   f.querySelectorAll('[data-c]').forEach((el) => el.addEventListener('input', () => {
     D[el.dataset.c] = el.type === 'number' ? Number(el.value || 0) : el.value; segna();
+    if (el.dataset.c === 'piva') { const n = pulisciPiva(el.value); const nota = $('#pivaNota', f); if (nota) nota.innerHTML = !n ? '' : pivaValida(n) ? '✓ P.IVA valida' : n.length < 11 ? `${n.length} cifre su 11` : '<span class="c-neg">P.IVA non valida: controlla le cifre</span>'; }
     if (el.dataset.c === 'nome') f.querySelector('.testa h2').textContent = el.value;
   }));
   f.querySelectorAll('[data-c]').forEach((el) => el.tagName === 'SELECT' && el.addEventListener('change', () => { D[el.dataset.c] = el.value; segna(); }));
@@ -448,23 +502,29 @@ function apriProspect(zid, id) {
     f.querySelector('[data-r=titolo]').value = b.titolo; f.querySelector('[data-r=cosa]').value = b.cosa;
     Object.assign(DR, { titolo: b.titolo, cosa: b.cosa, titolo_lista: '', punto: null }); segna(); toast('Bozza pronta: premi Salva per tenerla');
   };
-  $('#salva', f).onclick = () => { salva(); esci(); };
+  $('#salva', f).onclick = () => { if (salva() !== false) esci(); };
   $('#annulla', f).onclick = annulla;
-  $('#registra', f).onclick = () => { salva(); formContatto(zid, id); };
+  $('#registra', f).onclick = () => { if (salva() !== false) formContatto(zid, id); };
   $('#elimina', f).onclick = () => { if (confirm(`Eliminare ${p.nome}? Il registro resta nello storico del repository.`)) { sporco = false; aggiorna(zid, id, { del: true }); location.hash = '#prospect'; } };
 }
 
 /* ---------- registra contatto: un solo modulo aggiorna registro, stato e prossima azione ---------- */
 function formContatto(zid, id, preset = {}) {
   const p = ST.zone[zid].z.prospect[id];
-  const v = { canale: preset.canale || 'Telefono', esito: preset.esito || '', interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
-  v.stato = statoDaEsito(p.stato, v.esito);
-  if (ESITO_AZIONE[v.esito]) { v.prossima = ESITO_AZIONE[v.esito][0]; v.entro = piuGiorni(ESITO_AZIONE[v.esito][1], v.data); }
-  const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${v[k] === o ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+  // esiti a scelta multipla: stato e prossima azione seguono il più avanzato (l'ultimo nell'elenco ESITI)
+  const v = { canale: preset.canale || 'Telefono', esiti: preset.esito ? [preset.esito] : [], interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
+  const peso = (e) => { const st = ESITO_STATO[e]; return (st && /^Chiuso/.test(st) ? 100 : STATI.indexOf(st)) * 100 + ESITI.indexOf(e); };
+  const principale = () => v.esiti.slice().sort((a, b) => peso(a) - peso(b)).pop() || '';
+  const proponi = () => {
+    const e = principale(); v.stato = statoDaEsito(p.stato, e);
+    const az = ESITO_AZIONE[e]; if (az) { v.prossima = az[0]; v.entro = piuGiorni(az[1], v.data); } else { v.prossima = ''; v.entro = ''; }
+  };
+  proponi();
+  const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${(k === 'esito' ? v.esiti.includes(o) : v[k] === o) ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   const disegna = () => {
     const f = apriFoglio('Contatto · ' + p.nome, `
     <label class="f">Canale</label>${ch('canale', CANALI)}
-    <label class="f">Esito</label>${ch('esito', ESITI)}
+    <label class="f">Esito <span class="sub">(anche più di uno)</span></label>${ch('esito', ESITI)}
     <div class="due"><label class="f">Data<input id="cData" type="date" value="${v.data}"></label><label class="f">Interlocutore<input id="cInt" value="${esc(v.interlocutore)}"></label></div>
     <label class="f">Cosa è emerso<textarea id="cEm">${esc(v.emerso)}</textarea></label>
     <div class="box"><div class="eb" style="margin-top:0">Dopo questo contatto</div>
@@ -476,20 +536,21 @@ function formContatto(zid, id, preset = {}) {
     $('#annullaC').onclick = annullaC;
     const leggi = () => { v.data = $('#cData').value; v.interlocutore = $('#cInt').value; v.emerso = $('#cEm').value; v.prossima = $('#cPr').value; v.entro = $('#cEn').value; v.stato = $('#cSt').value; };
     f.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => {
-      leggi(); v[b.dataset.k] = b.dataset.v;
-      if (b.dataset.k === 'esito') { // proposta automatica, modificabile
-        v.stato = statoDaEsito(p.stato, v.esito);
-        const az = ESITO_AZIONE[v.esito]; if (az) { v.prossima = az[0]; v.entro = piuGiorni(az[1], v.data); } else { v.prossima = ''; v.entro = ''; }
-      }
+      leggi();
+      if (b.dataset.k === 'esito') { // tocco = aggiungi o togli; proposta automatica, modificabile
+        const o = b.dataset.v; v.esiti = v.esiti.includes(o) ? v.esiti.filter((x) => x !== o) : [...v.esiti, o];
+        proponi();
+      } else v[b.dataset.k] = b.dataset.v;
       disegna();
     }));
     $('#salva').onclick = () => {
-      leggi(); if (!v.esito) { toast("Scegli un esito"); return; }
+      leggi(); if (!v.esiti.length) { toast('Scegli almeno un esito'); return; }
+      const esiti = v.esiti.slice().sort((a, b) => ESITI.indexOf(a) - ESITI.indexOf(b));
       const z = ST.zone[zid].z; const rid = uid();
       z.registro = z.registro || {};
-      z.registro[rid] = { id: rid, p: id, data: v.data, canale: v.canale, interlocutore: v.interlocutore, esito: v.esito, emerso: v.emerso, prossima: v.prossima, entro: v.entro, u: ora() };
+      z.registro[rid] = { id: rid, p: id, data: v.data, canale: v.canale, interlocutore: maiuscole(v.interlocutore, true), esito: esiti.join(' · '), esiti, emerso: v.emerso, prossima: v.prossima, entro: v.entro, u: ora() };
       const campi = { stato: v.stato, prossima: CHIUSI.includes(v.stato) ? '' : v.prossima, data_prossima: CHIUSI.includes(v.stato) ? '' : v.entro };
-      if (v.interlocutore && !p.referente) campi.referente = v.interlocutore;
+      if (v.interlocutore && !p.referente) campi.referente = maiuscole(v.interlocutore, true);
       if (preset.giro) campi.giro = { ...p.giro, fatto: true, fatto_il: v.data };
       aggiorna(zid, id, campi); toast('Contatto salvato');
       if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id);
@@ -499,6 +560,33 @@ function formContatto(zid, id, preset = {}) {
 }
 
 /* ---------- vista: giro ---------- */
+/* ---------- mappa del giro (Leaflet, caricato solo quando serve) ---------- */
+let _leaflet = null;
+function caricaLeaflet() {
+  if (_leaflet) return _leaflet;   // Leaflet usa anch'esso window.L: con noConflict() torna la nostra logica.js
+  _leaflet = new Promise((ok, ko) => {
+    if (!document.querySelector('link[data-leaflet]')) { const css = document.createElement('link'); css.dataset.leaflet = '1'; css.rel = 'stylesheet'; css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'; document.head.appendChild(css); }
+    const js = document.createElement('script'); js.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+    js.onload = () => { const LL = window.L && window.L.noConflict ? window.L.noConflict() : null; LL ? ok(LL) : (_leaflet = null, ko(new Error('mappa non disponibile'))); }; js.onerror = () => { _leaflet = null; ko(new Error('mappa non disponibile offline')); }; document.head.appendChild(js);
+  });
+  return _leaflet;
+}
+async function disegnaMappaGiro() {
+  const box = $('#mappaGiro'); const pts = ST.mappaGiro || [];
+  if (!box || !pts.length) return;
+  let L0; try { L0 = await caricaLeaflet(); } catch (e) { box.innerHTML = `<div class="vuoto">${esc(e.message)}</div>`; return; }
+  if (!document.body.contains(box) || box._leaflet_id) return;   // vista cambiata durante il caricamento, o mappa già pronta
+  if (ST.mappaL) { try { ST.mappaL.remove(); } catch (e) { /* contenitore già sostituito */ } }
+  const m = ST.mappaL = L0.map(box, { zoomControl: false, attributionControl: true, scrollWheelZoom: false, dragging: !L0.Browser.mobile });
+  L0.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+  const ordinati = pts;   // già in ordine di lista, numerati come la lista
+  for (const zid of new Set(pts.map((p) => p.zid))) L0.polyline(pts.filter((p) => p.zid === zid).map((p) => [p.la, p.lo]), { color: '#18232A', weight: 2, opacity: .45, dashArray: '4 6' }).addTo(m);
+  for (const p of ordinati) {
+    const icona = L0.divIcon({ className: '', html: `<span class="mg-pin ${p.fatto ? 'fatto' : ''}">${p.fatto ? '✓' : esc(String(p.n || ''))}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+    L0.marker([p.la, p.lo], { icon: icona, title: p.nome, keyboard: true }).addTo(m).on('click', () => { location.hash = `#p/${p.zid}/${p.id}`; });
+  }
+  m.fitBounds(L0.latLngBounds(ordinati.map((p) => [p.la, p.lo])).pad(0.15), { maxZoom: 17 });
+}
 function vGiro() {
   const tt = tutti().filter((x) => x.p.giro && x.p.giro.data);
   const date = [...new Set(tt.map((x) => x.p.giro.data))].sort();
@@ -507,11 +595,17 @@ function vGiro() {
   const tappe = tt.filter((x) => x.p.giro.data === d).sort((a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
   const perZona = {}; tappe.forEach((x) => (perZona[x.zid] = perZona[x.zid] || []).push(x));
   const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
+  // anteprima su mappa: tappe con coordinate, numerate come nella lista
+  const nInZona = {};
+  ST.mappaGiro = tappe.map((x) => { const a = x.z.attivita[x.p.pid] || {}; const n = (nInZona[x.zid] = (nInZona[x.zid] || 0) + 1); return a.la && a.lo ? { zid: x.zid, id: x.p.id, n, nome: x.p.nome, fatto: !!x.p.giro.fatto, la: a.la, lo: a.lo } : null; }).filter(Boolean);
+  const senzaCoord = tappe.length - ST.mappaGiro.length;
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
   return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
   <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${esc(x)}">${esc(ggLungo(x))}</button>`).join('')}</div>
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
+  ${ST.mappaGiro.length ? `<div class="mappa-giro mt" id="mappaGiro" role="img" aria-label="Mappa delle tappe del giro"></div>
+  <div class="sub mappa-legenda"><span class="mg-pin">1</span> da visitare <span class="mg-pin fatto">✓</span> consegnato${senzaCoord ? ` · ${senzaCoord} tappe senza posizione` : ''}</div>` : ''}
   ${Object.entries(perZona).map(([zid, arr]) => `
     <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${arr.length} tappe pianificate · ${arr.filter((x) => x.p.giro.fatto).length} consegnate</div>
     <div class="lista">${arr.map((x, i) => {
@@ -705,7 +799,7 @@ function nuovoProspect(zid, pid) {
   // gli invisibili con almeno 20 recensioni tengono a Google: passano tra i caldi
   const prio = rete ? '3 Rete' : (a.rv || 0) >= 20 && (!m.top20 || !m.top3) ? '1 Caldo' : !m.top20 ? '0 Invisibile' : '2 Tiepido';
   const gancio = !m.top20 ? `Non compare tra i primi 20 in nessuno dei ${m.N} punti` : `${a.rv || 0} recensioni a ${L.virgola(a.r)}; nel top 3 in ${m.top3} punti su ${m.N}, presente in ${m.top20}`;
-  z.prospect[id] = { id, pid, nome: a.n, priorita: prio, stato: 'Da contattare', prossima: rete ? 'Gestione separata franchising' : "Consegnare il report e proporre l'incontro", data_prossima: '',
+  z.prospect[id] = { id, pid, nome: maiuscole(a.n), priorita: prio, stato: 'Da contattare', prossima: rete ? 'Gestione separata franchising' : "Consegnare il report e proporre l'incontro", data_prossima: '',
     referente: '', telefono: a.t || '', email: '', sito: a.w || '', indirizzo: a.a || '', gancio, prodotto: '', valore: 0, segmento: rete ? 'Franchising' : 'Indipendente', note: '',
     giro: {}, report: { includi: !rete, luogo: rete ? 'agenzia' : undefined }, u: ora() };
   modificato(zid); toast('Aggiunto ' + a.n); apriZona(zid);
@@ -798,7 +892,7 @@ function vCruscotto() {
     <button><b>${tt.length}</b><span>Prospect</span></button>
     <button><b>${regs.length}</b><span>Contatti registrati</span></button>
     <button><b>${regs.filter((r) => r.data >= sett).length}</b><span>Contatti ultimi 7 gg</span></button>
-    <button><b>${regs.filter((r) => r.esito === 'Appuntamento fissato').length}</b><span>Appuntamenti fissati</span></button>
+    <button><b>${regs.filter((r) => esitiDi(r).includes('Appuntamento fissato')).length}</b><span>Appuntamenti fissati</span></button>
     <button><b class="c-top">${vinti.length}</b><span>Chiusi vinti</span></button>
     <button><b>${vinti.length + persi.length ? Math.round(vinti.length / (vinti.length + persi.length) * 100) + '%' : '—'}</b><span>Tasso di chiusura</span></button>
     <button><b>${eur(vinti.reduce((s, x) => s + (+x.p.valore || 0), 0))}</b><span>Valore firmato</span></button>
@@ -808,7 +902,7 @@ function vCruscotto() {
   <div class="eb">Aperti per priorità</div>
   <table class="funnel" style="width:100%">${PRIORITA.map((pr) => `<tr><td>${prioHtml(pr)}</td><td class="mono" style="text-align:right">${tt.filter((x) => x.p.priorita === pr && aperto(x.p)).length}</td></tr>`).join('')}</table>
   <div class="eb">Esiti dei contatti</div>
-  <table class="funnel" style="width:100%">${ESITI.map((e) => [e, regs.filter((r) => r.esito === e).length]).filter((x) => x[1]).map(([e, n]) => `<tr><td>${e}</td><td class="mono" style="text-align:right">${n}</td></tr>`).join('') || '<tr><td class="sub">Ancora nessun contatto registrato.</td></tr>'}</table>`;
+  <table class="funnel" style="width:100%">${ESITI.map((e) => [e, regs.filter((r) => esitiDi(r).includes(e)).length]).filter((x) => x[1]).map(([e, n]) => `<tr><td>${e}</td><td class="mono" style="text-align:right">${n}</td></tr>`).join('') || '<tr><td class="sub">Ancora nessun contatto registrato.</td></tr>'}</table>`;
 }
 
 /* ---------- vista: altro ---------- */
@@ -849,10 +943,10 @@ async function preparaRepo(out) {
   }
 }
 function esportaCSV(zid) {
-  const righe = [['Zona', 'ID', 'Priorità', 'Agenzia', 'Stato', 'Prossima azione', 'Data prossima azione', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'PagineGialle', 'Indirizzo', 'Gancio', 'Prodotto', 'Valore', 'Segmento', 'Top 3', 'Top 20', 'Recensioni', 'Valutazione', 'Data giro', 'Ordine giro', 'Note']];
+  const righe = [['Zona', 'ID', 'Priorità', 'Agenzia', 'Stato', 'Prossima azione', 'Data prossima azione', 'Ultimo contatto', 'N. contatti', 'Referente', 'Telefono', 'Email', 'Sito', 'Partita IVA', 'PagineGialle', 'Indirizzo', 'Gancio', 'Prodotto', 'Valore', 'Segmento', 'Top 3', 'Top 20', 'Recensioni', 'Valutazione', 'Data giro', 'Ordine giro', 'Note']];
   tutti().filter((x) => !zid || x.zid === zid).forEach(({ zid: z0, z, p }) => {
     const a = z.attivita[p.pid] || {}; const m = a.n ? L.metriche(z, p.pid) : {};
-    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, PG[p.pg] || 'da verificare', p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r != null ? L.virgola(a.r) : '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
+    righe.push([z.meta.quartiere, p.id, p.priorita, p.nome, p.stato, p.prossima, p.data_prossima, ultimoContatto(z0, p.id), registro(z0, p.id).length, p.referente, p.telefono, p.email, p.sito, p.piva ? `="${p.piva}"` : '', PG[p.pg] || 'da verificare', p.indirizzo, p.gancio, p.prodotto, p.valore, p.segmento, m.top3 ?? '', m.top20 ?? '', a.rv ?? '', a.r != null ? L.virgola(a.r) : '', (p.giro || {}).data || '', (p.giro || {}).ordine || '', p.note]);
   });
   const reg = [['Zona', 'Data', 'ID', 'Agenzia', 'Canale', 'Interlocutore', 'Esito', 'Cosa è emerso', 'Prossima azione', 'Entro il']];
   Object.entries(ST.zone).filter(([k]) => !zid || k === zid).forEach(([k, s]) => Object.values(s.z.registro || {}).filter((r) => !r.del).sort((a, b) => (a.data > b.data ? 1 : -1))
@@ -878,6 +972,7 @@ function legaVista(v) {
     q.onkeydown = (e) => { if (e.key === 'Enter') q.blur(); };
   }
   if (v === 'giro') {
+    disegnaMappaGiro();
     $('#gData').onchange = (e) => { ST.giroData = e.target.value; render(); };
     $('#gAgg').onclick = scegliTappa;
     const gs = $('#gSposta'); if (gs) gs.onclick = formSpostaGiro;

@@ -49,6 +49,26 @@ def classifica(corpo):
     return None
 
 
+def piva_valida(n):
+    """controllo di Luhn della partita IVA italiana (11 cifre)"""
+    if not re.fullmatch(r"\d{11}", n or "") or n == "0" * 11: return False
+    s = 0
+    for i, c in enumerate(n[:10]):
+        d = int(c)
+        if i % 2: d = d * 2 - 9 if d * 2 > 9 else d * 2
+        s += d
+    return (10 - s % 10) % 10 == int(n[10])
+
+
+def trova_piva(corpo):
+    """partita IVA dichiarata nella pagina (di solito nel piè di pagina): la prima valida vicino a 'iva' o 'vat'"""
+    testo = _testo(re.sub(r"(?s)<(script|style|noscript)\b.*?</\1>", " ", corpo))
+    for m in re.finditer(r"(?:\bp\.?\s?iva\b|\bpartita\s+iva\b|\bp\.i\.|\bvat\b(?:\s+number)?)[^0-9]{0,40}?(?:it\s?)?(?<!\d)((?:\d[ .]?){10}\d)(?!\d)", testo, re.I):
+        n = re.sub(r"\D", "", m.group(1))
+        if piva_valida(n): return n
+    return None
+
+
 def _scegli(ultimo, nuovo):
     """tiene l'indizio più forte tra il tentativo https e quello http"""
     if ultimo is None or FORZA.get(nuovo["stato"], 0) > FORZA.get(ultimo["stato"], 0): return nuovo
@@ -71,6 +91,8 @@ def visita(url):
                 with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
                     corpo = r.read(120000).decode("utf-8", "ignore").lower()
                     esito = {"stato": "ok", "codice": r.status, "finale": r.geturl(), "ms": int((time.time() - t0) * 1000)}
+                    piva = trova_piva(corpo)
+                    if piva: esito["piva"] = piva
                     if not verifica_ssl or ssl_rotto:
                         esito.update(stato="ssl", nota="il sito risponde ma il certificato HTTPS non è valido")
                     tipo = classifica(corpo)
