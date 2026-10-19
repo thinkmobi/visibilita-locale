@@ -740,7 +740,7 @@ async function attendiImport(id, k, out) {
     await new Promise((r) => setTimeout(r, 15000));
     const e = await GH.getJSON(`zone/${id}/importa-esito.json`).catch(() => null);
     if (e && e.data.report_key === k) {
-      if (e.data.stato === 'in_attesa') { if (out) out.textContent = 'Local Falcon sta ancora elaborando la scansione: riprovo da solo.'; continue; }
+      if (e.data.stato === 'in_attesa') { const m = 'Local Falcon sta ancora elaborando la scansione: rilancia l\'import tra qualche minuto.'; if (out) out.textContent = m; else toast(m, 6000); return; }
       if (e.data.stato === 'ok') {
         await scarica();
         const z = ST.zone[id]; if (z && !z.z.meta.luogo) { const rq = await GH.getJSON(`zone/${id}/richiesta.json`); z.z.meta.luogo = rq && rq.data.luogo || 'ufficio'; z.z.meta.u = ora(); modificato(id); }

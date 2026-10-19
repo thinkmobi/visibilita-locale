@@ -13,6 +13,11 @@ PROSSIMO_PASSO = {
     "items": [["Concorrenti", "chi la precede, punto per punto"], ["Recensioni", "quante, quanto recenti, cosa dicono"],
               ["Assistenti AI", "se la citano nelle loro risposte"], ["Scheda Google", "le modifiche fatte senza avvisarla"]],
     "outro": "Le propongo un incontro di mezz'ora: guardiamo insieme l'analisi completa e decidiamo da dove partire."}
+MAX_TENTATIVI = 3   # oltre, una richiesta che fallisce sempre non viene più ritentata a ogni workflow
+
+
+class InAttesa(RuntimeError):
+    """Local Falcon non ha ancora finito di elaborare la scansione"""
 
 
 def num(x, tipo=float):
@@ -70,10 +75,10 @@ def _chiedi_report(chiave, api_key, attese=20):
         if stato == 200 and (risposta.get("data") or {}).get("data_points"):
             return risposta["data"]
         time.sleep(30)          # 202 = scansione ancora in elaborazione
-    raise RuntimeError("Local Falcon non ha restituito i punti della griglia entro 10 minuti")
+    raise InAttesa("Local Falcon sta ancora elaborando la scansione (nessun punto della griglia dopo 10 minuti): riprovo al prossimo import")
 
 
-def zona_da_report(d, rq, esistente=None):
+def zona_da_report(d, rq, esistente=None, avvisi=None):
     z = esistente or {"v": 1, "prospect": {}, "registro": {}}
     data = (d.get("date") or "")[:10]
     try:
@@ -98,8 +103,14 @@ def zona_da_report(d, rq, esistente=None):
     att = z.get("attivita") or {}
     ora = int(time.time() * 1000)   # i dati appena importati vincono sulle copie locali dell'app
     punti = []
+    scartati = 0
     for p in d["data_points"]:
-        ris = sorted(p.get("results") or [], key=lambda q: int(q["rank"]))
+        if num(p.get("lat")) is None or num(p.get("lng")) is None:
+            scartati += 1; continue
+        # un risultato malformato (posizione non numerica, place_id assente) si salta senza fermare l'import
+        validi = [q for q in p.get("results") or [] if isinstance(q, dict) and q.get("place_id") and num(q.get("rank"), int) is not None]
+        scartati += len(p.get("results") or []) - len(validi)
+        ris = sorted(validi, key=lambda q: num(q["rank"], int))
         for q in ris:
             pid = q["place_id"]
             vecchio = att.get(pid, {})
@@ -111,6 +122,8 @@ def zona_da_report(d, rq, esistente=None):
                         # si tiene solo un dato verificato a parte (cv), altrimenti resta sconosciuto
                         "c": vecchio.get("c") if vecchio.get("cv") else None, "cv": vecchio.get("cv"), "u": ora, "cat": list((q.get("categories") or {}).values())}
         punti.append([num(p["lat"]), num(p["lng"]), [q["place_id"] for q in ris]])
+    if not punti: raise RuntimeError("la scansione non contiene punti della griglia utilizzabili")
+    if scartati and avvisi is not None: avvisi.append(f"{scartati} risultati o punti malformati ignorati")
     z.update({"meta": meta, "attivita": att, "punti": punti})
     return z
 
@@ -123,28 +136,54 @@ def scarica(url, dest):
 
 def main(percorso):
     cartella = os.path.dirname(os.path.abspath(percorso))
-    rq = json.load(open(percorso, encoding="utf-8"))
-    esito = {"report_key": rq.get("report_key"), "stato": "errore"}
+    fe = os.path.join(cartella, "importa-esito.json")
     try:
+        prima = json.load(open(fe, encoding="utf-8"))
+    except Exception:
+        prima = {}
+    rq = {}
+    esito = {"report_key": None, "stato": "errore"}
+    try:
+        rq = json.load(open(percorso, encoding="utf-8"))
+        esito.update(report_key=rq.get("report_key"), creata=rq.get("creata"))
+        # stessa richiesta già fallita più volte: non si ritenta a ogni workflow; una nuova richiesta dall'app azzera il conto
+        stessa = prima.get("report_key") == esito["report_key"] and prima.get("creata") == esito["creata"]
+        n = prima.get("tentativi", 0) if stessa and prima.get("stato") == "errore" else 0
+        if n >= MAX_TENTATIVI:
+            ultimo = prima.get("errore") or prima.get("messaggio") or "errore sconosciuto"
+            esito.update(tentativi=n, errore=ultimo,
+                         messaggio=f"import sospeso dopo {n} tentativi non riusciti ({ultimo}): invia di nuovo la richiesta dall'app per riprovare")
+            json.dump(esito, open(fe, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            print(esito["messaggio"])
+            return
+        esito["tentativi"] = n + 1
         api_key = os.environ.get("LOCALFALCON_API_KEY")
         if not api_key: raise RuntimeError("manca il secret LOCALFALCON_API_KEY nel repository dati")
         d = chiedi_report(rq["report_key"], api_key)
         fz = os.path.join(cartella, "zona.json")
         esistente = json.load(open(fz, encoding="utf-8")) if os.path.exists(fz) else None
-        z = zona_da_report(d, rq, esistente)
+        avvisi = []
+        z = zona_da_report(d, rq, esistente, avvisi)
         z["id"] = os.path.basename(cartella)
-        if d.get("image"):
-            try:
-                scarica(d["image"], os.path.join(cartella, "sfondo.png")); z["meta"]["sfondo"] = "sfondo.png"
-            except Exception as e:  # la stampa funziona anche senza sfondo
-                esito["avviso"] = f"sfondo non scaricato: {e}"
+        fs = os.path.join(cartella, "sfondo.png")
+        try:
+            if not d.get("image"): raise RuntimeError("Local Falcon non ha fornito l'immagine")
+            scarica(d["image"], fs); z["meta"]["sfondo"] = "sfondo.png"
+        except Exception as e:  # la stampa funziona anche senza sfondo, ma non con la mappa della scansione precedente
+            z["meta"].pop("sfondo", None)
+            if os.path.exists(fs): os.remove(fs)
+            avvisi.insert(0, f"sfondo non scaricato: {e}")
         json.dump(z, open(fz, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
-        esito.update({"stato": "ok", "punti": len(z["punti"]), "attivita": len(z["attivita"])})
+        esito = {"report_key": esito["report_key"], "creata": esito["creata"], "stato": "ok",
+                 "punti": len(z["punti"]), "attivita": len(z["attivita"])}
+        if avvisi: esito["avviso"] = "; ".join(avvisi)
+    except InAttesa as e:   # non è un errore: l'app mostra l'attesa e il conto dei tentativi non sale
+        esito.update(stato="in_attesa", messaggio=str(e), tentativi=esito.get("tentativi", 1) - 1)
     except Exception as e:
-        esito["messaggio"] = str(e)
-    json.dump(esito, open(os.path.join(cartella, "importa-esito.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        esito.update(messaggio=str(e), errore=str(e))
+    if esito.get("creata") is None: esito.pop("creata", None)
+    json.dump(esito, open(fe, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(esito, ensure_ascii=False, indent=1))
-
 
 if __name__ == "__main__":
     main(sys.argv[1])

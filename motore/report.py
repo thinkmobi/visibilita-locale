@@ -2,7 +2,7 @@
 Layout v6 del 18/10/2026 (attività in testata, titoli brevi, avviso scheda non rivendicata,
 prossimo passo con proposta in coda alla descrizione, contatti in un box bordato di verde); i dati arrivano da zone/<id>/stampa.json,
 preparato dall'app. Uso: python motore/report.py zone/<id>/stampa.json"""
-import json, math, sys, os
+import json, math, sys, os, html
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, white
@@ -28,6 +28,10 @@ def stars(t):
 DP = []          # punti della griglia: [{"lat":..,"lng":..,"results":[{"rank":..,"place_id":..}]}]
 JOB = {}         # stampa.json completo (occhiello, firma, centro)
 AVVISI = []
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from importa import PROSSIMO_PASSO   # stesso testo di default dell'import, se stampa.json non lo porta
+SMIN = 70 * mm   # mappa più piccola accettabile: sotto si riduce il testo e si avvisa
+TMAX = 18 * mm   # altezza massima del titolo (tre righe in corpo 16)
 
 INK = HexColor("#18232A"); BOX = HexColor("#F4F5F3"); MUTE = HexColor("#5F6B70"); LINE = HexColor("#D2D7D3")
 HOME = HexColor("#1A73E8"); NEGBG = HexColor("#FCE4E2"); NEGBR = HexColor("#C5221F"); NEGTX = HexColor("#5C1410")
@@ -65,6 +69,27 @@ def posizioni(lab):
     return re.sub(r"prime (\d+)$", r"prime \1 posizioni", lab.strip())
 
 
+def tronca(testo, font, size, w):
+    """accorcia con … finché il testo sta nella larghezza w (per drawString)"""
+    if pdfmetrics.stringWidth(testo, font, size) <= w: return testo
+    while testo and pdfmetrics.stringWidth(testo + "…", font, size) > w: testo = testo[:-1]
+    return testo.rstrip(" ,.;:-–·") + "…"
+
+
+def adatta(fare, testo, w, hmax):
+    """fare(testo) -> Paragraph; se non sta in hmax toglie parole in coda e chiude con …. Restituisce (paragrafo, tagliato)"""
+    p = fare(testo)
+    if p.wrap(w, 500 * mm)[1] <= hmax: return p, False
+    parole = testo.split(" ")
+    corto = lambda n: " ".join(parole[:n]).rstrip(" ,.;:-") + "…"
+    lo, hi = 0, len(parole)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if fare(corto(mid)).wrap(w, 500 * mm)[1] <= hmax: lo = mid
+        else: hi = mid - 1
+    return fare(corto(lo)), True
+
+
 def draw_par(c, p, x, ytop, w):
     _, h = p.wrap(w, 200 * mm); p.drawOn(c, x, ytop - h); return h
 
@@ -87,41 +112,65 @@ def analysis(c, cfg, X, Y, W, H):
     top = Y + H - MT
     # intestazione: a sinistra l'attività, a destra ricerca e data
     nm, _, addr = cfg["subtitle"].partition(" · ")
-    nm = nm.replace("&amp;", "&")
+    nm, addr = html.unescape(nm), html.unescape(addr)   # in drawString le entità resterebbero letterali
     hy = top - 2.4 * mm
     rt = (JOB["occhiello"].replace("  ", " ").rsplit(",", 1)[0] + " · " + cfg["date"]).upper()
     rw_ = c.stringWidth(rt, "MOB", 5.2) + .5 * len(rt)
     fn = 10.5
     while c.stringWidth(nm, "C", fn) + c.stringWidth(addr, "MO", 6.2) + 12 * mm > W - 2 * M - rw_ and fn > 8: fn -= .25
+    # nomi lunghissimi: il nome tiene almeno il 60% dello spazio, l'indirizzo prende il resto o sparisce
+    disp = W - 2 * M - rw_ - 6.3 * mm - 3 * mm
+    aw = c.stringWidth(addr, "MO", 6.2) + 2.2 * mm if addr else 0
+    corto = tronca(nm, "C", fn, max(disp - aw, disp * .6))
+    if corto != nm: AVVISI.append(f"Nome troppo lungo nell'intestazione, accorciato: {nm}")
+    nm = corto
+    resto = disp - c.stringWidth(nm, "C", fn) - 2.2 * mm
+    addr = tronca(addr, "MO", 6.2, resto) if resto > 12 * mm else ""
     c.setFillColor(C_TOP); c.rect(X + M, hy + .5 * mm, 4.5 * mm, .9 * mm, stroke=0, fill=1)
     c.setFillColor(INK); c.setFont("C", fn); c.drawString(X + M + 6.3 * mm, hy, nm)
-    c.setFillColor(MUTE); c.setFont("MO", 6.2); c.drawString(X + M + 6.3 * mm + c.stringWidth(nm, "C", fn) + 2.2 * mm, hy, addr.replace("&amp;", "&"))
+    c.setFillColor(MUTE); c.setFont("MO", 6.2); c.drawString(X + M + 6.3 * mm + c.stringWidth(nm, "C", fn) + 2.2 * mm, hy, addr)
     t = c.beginText(); t.setFont("MOB", 5.2); t.setCharSpace(.5)
     t.setTextOrigin(X + W - M - rw_, hy); t.setFillColor(MUTE); t.textOut(rt); t.setCharSpace(0); c.drawText(t)
     c.setStrokeColor(LINE); c.setLineWidth(.5); c.line(X + M, hy - 2 * mm, X + W - M, hy - 2 * mm)
     # titolo breve
     yy = hy - 3.6 * mm
-    yy -= draw_par(c, P(cfg["title"], "C", 16, 17), X + M, yy, W - 2 * M) + 3.2 * mm
+    ft = 16
+    while ft > 11 and P(cfg["title"], "C", ft, ft * 17 / 16).wrap(W - 2 * M, 500 * mm)[1] > TMAX: ft -= .5
+    tp, lungo = adatta(lambda t: P(t, "C", ft, ft * 17 / 16), cfg["title"], W - 2 * M, TMAX)
+    yy -= draw_par(c, tp, X + M, yy, W - 2 * M) + 3.2 * mm
     body_top = yy
     foot_h = 7.2 * mm
     body_bot = Y + MB + foot_h
     # mappa: metà sinistra
     half = W / 2
     cosa = next((b for h_, b in cfg["blocks"] if not isinstance(b, dict)), None)
-    kl = 1.0
-    S = 88 * mm
-    for _ in range(4):
-        cp = P(f"<font name='C' size='{9 * kl:.2f}'>Cosa vuol dire</font><br/>{stars(cosa)}", "P", 6.7 * kl, 8.8 * kl, NEGTX)
-        _, hcosa = cp.wrap(S - 5 * mm, 80 * mm)
-        S = min(half - M - 3 * mm, body_top - body_bot - 1.5 * mm - 7.2 * mm - (hcosa + 3.2 * mm), 94 * mm)
-    SLOG.append(S)
-    if SFIX: S = SFIX
-    _, hcosa = cp.wrap(S - 5 * mm, 80 * mm)
-    hbox = (body_top - S - 7.2 * mm) - (body_bot + 1.5 * mm)
+    fcosa = lambda t, k_: P(f"<font name='C' size='{9 * k_:.2f}'>Cosa vuol dire</font><br/>{stars(t)}", "P", 6.7 * k_, 8.8 * k_, NEGTX)
+    alto = body_top - body_bot - 1.5 * mm - 7.2 * mm   # mappa + legenda + box "Cosa vuol dire"
+    for kl in (1.0, .92, .84, .76):   # testo lungo: prima si riduce il corpo, poi si rinuncia a parte della mappa
+        S = 88 * mm
+        for _ in range(4):
+            cp = fcosa(cosa, kl)
+            _, hcosa = cp.wrap(S - 5 * mm, 80 * mm)
+            S = min(half - M - 3 * mm, alto - (hcosa + 3.2 * mm), 94 * mm)
+        if S >= SMIN: break
+    if S < SMIN: lungo = True; S = SMIN
+    else: SLOG.append(S)     # un'analisi fuori misura non rimpicciolisce le mappe delle altre
+    if SFIX and S >= SFIX: S = SFIX
+    S = min(S, alto - 8 * mm)
+    hbox = alto - S
     for kk in [x / 100 for x in range(130, 99, -2)]:
-        cq = P(f"<font name='C' size='{9 * kk:.2f}'>Cosa vuol dire</font><br/>{stars(cosa)}", "P", 6.7 * kk, 8.8 * kk, NEGTX)
+        cq = fcosa(cosa, kk)
         if cq.wrap(S - 5.8 * mm, 80 * mm)[1] <= hbox - 3.6 * mm:
             cp = cq; break
+    else:
+        if cp.wrap(S - 5.8 * mm, 80 * mm)[1] > hbox - .5 * mm:   # il testo esce dal box: corpo più piccolo, poi taglio
+            for kk in [x / 100 for x in range(98, 69, -2)]:
+                cq = fcosa(cosa, kk)
+                if cq.wrap(S - 5.8 * mm, 80 * mm)[1] <= hbox - 3.6 * mm:
+                    cp = cq; break
+            else:
+                cp, tagliato = adatta(lambda t: fcosa(t, .7), cosa, S - 5.8 * mm, hbox - 3.6 * mm); lungo = lungo or tagliato
+    if lungo: AVVISI.append(f"Testo troppo lungo per {html.unescape(cfg['name'])}: accorcia titolo o 'Cosa vuol dire'")
     _, hcosa = cp.wrap(S - 5.8 * mm, 80 * mm)
     mx = X + M; my = body_top - S
     BG = cfg.get("bg")
@@ -133,6 +182,9 @@ def analysis(c, cfg, X, Y, W, H):
         c.setFillColor(BOX); c.setStrokeColor(LINE); c.setLineWidth(.6); c.roundRect(mx, my, S, S, 1.5 * mm, stroke=1, fill=1)
     lats = [float(p["lat"]) for p in DP]; lngs = [float(p["lng"]) for p in DP]
     la0, la1, lo0, lo1 = min(lats), max(lats), min(lngs), max(lngs)
+    # griglia di un punto o di una sola riga/colonna: si allarga l'asse piatto per non dividere per zero
+    if la1 - la0 < 1e-9: d = (lo1 - lo0) * .7 / 2 or .005; la0, la1 = la0 - d, la1 + d
+    if lo1 - lo0 < 1e-9: d = (la1 - la0) / .7 / 2 or .007; lo0, lo1 = lo0 - d, lo1 + d
     pad = S * (.203 if BG else .085)
     xy = lambda la, lo: (mx + pad + (lo - lo0) / (lo1 - lo0) * (S - 2 * pad), my + pad + (la - la0) / (la1 - la0) * (S - 2 * pad))
     rr = (S - 2 * pad) / 6 * (.36 if BG else .40)
@@ -207,8 +259,8 @@ def right_column(c, cfg, rx, rw, top, k, extra, draw):
     labs = [P(stars(posizioni(st["lab"]).replace(" 3", "\u00a03").replace(" 20", "\u00a020")).upper().replace("<FONT NAME='DJ' COLOR='#E0A43A'>", "<font name='DJ' color='#E0A43A'>").replace("</FONT>", "</font>"), "MOB", 5 * k, 6.4 * k, MUTE) for st in cfg["stats"]]
     fb = 21 * k
     def wstat(st, f): return c.stringWidth(st["big"], "C", f) + (c.stringWidth(st.get("pct", ""), "C", f * .55) + 1.4 * mm if st.get("pct") else 0)
-    while max(wstat(st, fb) for st in cfg["stats"]) > bw - 1 * mm and fb > 12: fb -= .5
-    bh = fb * .78 + 1.6 * mm + max(l.wrap(bw, 50 * mm)[1] for l in labs)
+    while max((wstat(st, fb) for st in cfg["stats"]), default=0) > bw - 1 * mm and fb > 12: fb -= .5
+    bh = fb * .78 + 1.6 * mm + max((l.wrap(bw, 50 * mm)[1] for l in labs), default=0)
     if draw:
         for i, s in enumerate(cfg["stats"]):
             bx = rx + i * (bw + gap); col = s.get("color")
@@ -261,7 +313,12 @@ def right_column(c, cfg, rx, rw, top, k, extra, draw):
             cy = y - rh / 2 + .3 * mm
             c.setFillColor(col); c.circle(rx + 2.4 * mm, cy, 1.65 * mm * min(k, 1.1), stroke=0, fill=1)
             c.setFillColor(white if rank else INK); c.setFont("MOB", (5.6 if rank else 4) * min(k, 1.1)); c.drawCentredString(rx + 2.4 * mm, cy - .65 * mm, str(rank) if rank else "20+")
-            c.setFillColor(INK); fn = "P-B" if me else "P"; c.setFont(fn, 7 * k); c.drawString(rx + 5.6 * mm, cy - .85 * mm * k, nm)
+            fn = "P-B" if me else "P"
+            # il nome non deve arrivare sotto le recensioni né spingere fuori il bollino LEI
+            fine = rx + rw - ((c.stringWidth("\u2605", "DJ", 6.4 * k) + .8 * mm + c.stringWidth(rev, "MOM", 6.2 * k) + 2 * mm) if rev else 0)
+            if me: fine -= c.stringWidth("LEI", "MOB", 4.6 * k) + 3.4 * mm
+            nm = tronca(html.unescape(nm), fn, 7 * k, fine - rx - 5.6 * mm)
+            c.setFillColor(INK); c.setFont(fn, 7 * k); c.drawString(rx + 5.6 * mm, cy - .85 * mm * k, nm)
             if me:
                 tx = rx + 5.6 * mm + c.stringWidth(nm, fn, 7 * k) + 1.6 * mm; tw_ = c.stringWidth("LEI", "MOB", 4.6 * k) + 1.8 * mm
                 c.setFillColor(HOME); c.roundRect(tx, cy - 1.15 * mm, tw_, 2.3 * mm, .5 * mm, stroke=0, fill=1)
@@ -338,10 +395,15 @@ def prepara(job, cartella):
     accoppia i e i+metà, così tagliando la risma a metà e sovrapponendo le pile l'ordine del giro resta corretto"""
     global DP, JOB
     JOB = job; JOB["firma"] = {**FIRMA, **(job.get("firma") or {})}
-    DP = [{"lat": la, "lng": lo, "results": [{"rank": i + 1, "place_id": p} for i, p in enumerate(r)]} for la, lo, r in job["punti"]]
+    try:
+        DP = [{"lat": float(la), "lng": float(lo), "results": [{"rank": i + 1, "place_id": p} for i, p in enumerate(r or [])]} for la, lo, r in job["punti"]]
+    except (KeyError, TypeError, ValueError):
+        DP = []
+    if not DP:
+        raise ValueError("griglia non utilizzabile in stampa.json: mancano i punti o hanno coordinate non valide. Rifai l'importazione della scansione dall'app.")
     bg = os.path.join(cartella, job["sfondo"]) if job.get("sfondo") else None
     if bg and not os.path.exists(bg): AVVISI.append("sfondo mappa non trovato: stampa senza mappa"); bg = None
-    nxt = job["prossimo_passo"]
+    nxt = {**PROSSIMO_PASSO, **(job.get("prossimo_passo") or {})}
     nxt = {"intro": esc(nxt["intro"]), "items": [], "outro": esc(nxt["outro"]).replace(": ", ":<br/>", 1)}
     try:
         att = json.load(open(os.path.join(cartella, "zona.json"), encoding="utf-8")).get("attivita", {})
@@ -370,10 +432,12 @@ def genera(percorso_job):
     global SFIX
     cartella = os.path.dirname(os.path.abspath(percorso_job))
     job = json.load(open(percorso_job, encoding="utf-8"))
+    AVVISI.clear()
     cfgs = prepara(job, cartella)
+    pre = list(AVVISI)                   # avvisi di prepara (sfondo mancante): non vanno persi col primo passaggio
     SLOG.clear(); SFIX = None
     build(cfgs, io.BytesIO())            # primo passaggio: misura la mappa più piccola
-    SFIX = min(SLOG); AVVISI.clear()     # secondo passaggio: stessa dimensione mappa su tutte le analisi
+    SFIX = min(SLOG) if SLOG else None; AVVISI[:] = pre   # secondo passaggio: stessa dimensione mappa su tutte le analisi
     os.makedirs(os.path.join(cartella, "stampa"), exist_ok=True)
     nome = job["file"] + ".pdf"
     build(cfgs, os.path.join(cartella, "stampa", nome))
@@ -384,4 +448,7 @@ def genera(percorso_job):
 
 
 if __name__ == "__main__":
-    genera(sys.argv[1])
+    try:
+        genera(sys.argv[1])
+    except ValueError as e:   # dati inutilizzabili: messaggio chiaro nel log invece del traceback
+        print("ERRORE:", e, file=sys.stderr); sys.exit(1)
