@@ -223,3 +223,4 @@ body.largo .vista{padding-left:max(16px,env(safe-area-inset-left));padding-right
 .foglio .testa .sync{flex:none}
 @media (max-width:380px){.foglio .testa .sync span:last-child{display:none}}
 .barra-salva .btn.pri.fatto:disabled{opacity:1;background:var(--top-t);color:var(--g1);border-color:transparent}
+.btn.annulla.neutro{border-color:var(--line);color:var(--ink);font-weight:600}

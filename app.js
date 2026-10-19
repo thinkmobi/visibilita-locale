@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.2';
+const VERSIONE = '1.10.3';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -416,6 +416,17 @@ const ICO = {
   web: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/>',
 };
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICO[k]}</svg>`;
+/* barra in fondo ai fogli: stesso comportamento ovunque
+   vuoto   → "Chiudi" + azione disattivata (nulla da salvare)
+   sporco  → "Annulla" (rosso) + azione attiva
+   salvato → "Chiudi" + "✓ … alle HH:MM" (verde chiaro) */
+const oraAdesso = () => oraRoma(Date.now(), { hour: '2-digit', minute: '2-digit' });
+function statoBarra(f, stato, testo) {
+  const [sx, dx] = f.querySelectorAll('.barra-salva .btn'); if (!sx || !dx) return;
+  sx.textContent = stato === 'sporco' ? 'Annulla' : 'Chiudi'; sx.classList.toggle('neutro', stato !== 'sporco');
+  dx.disabled = stato !== 'sporco'; dx.classList.toggle('fatto', stato === 'salvato');
+  dx.textContent = stato === 'salvato' ? '✓ ' + (testo || 'Salvato') + ' alle ' + oraAdesso() : testo || (stato === 'sporco' ? 'Salva modifiche' : 'Nessuna modifica');
+}
 function apriFoglio(titolo, html, onClose) {
   const f = $('#foglio');
   f.innerHTML = `<div class="testa"><button id="chiudi" aria-label="Chiudi">←</button><h2>${esc(titolo)}</h2><span id="fSync" class="sync ${ST.sync.stato}" role="status"><span class="dot"></span><span>${esc(ST.sync.msg)}</span></span></div><div class="corpo">${html}</div>`;
@@ -436,7 +447,7 @@ function minigriglia(z, pid) {
   const cl = (r) => (!r ? 'g-no' : r === 1 ? 'g-1' : r === 2 ? 'g-2' : r === 3 ? 'g-3' : r <= 6 ? 'g-y' : r <= 10 ? 'g-o' : 'g-r');
   return `<div class="griglia" style="grid-template-columns:repeat(${n},1fr)">${rows.flat().map((i) => { const r = m.ranks[i]; return `<i class="${cl(r)}">${r || ''}</i>`; }).join('')}</div>` + `<div class="griglia-legenda"><span><i style="background:var(--g1)"></i>1-3 visibile</span><span><i style="background:var(--y)"></i>4-10 poco visibile</span><span><i style="background:var(--r1)"></i>11-20 invisibile</span><span><i style="background:var(--r2)"></i>assente</span></div>`;
 }
-function apriProspect(zid, id) {
+function apriProspect(zid, id, opz = {}) {
   const s = ST.zone[zid]; if (!s || !s.z.prospect[id]) { location.hash = '#prospect'; return; }
   const z = s.z, p = z.prospect[id], a = z.attivita[p.pid] || {};
   const m = p.pid && z.punti && z.attivita[p.pid] ? L.metriche(z, p.pid) : null;
@@ -500,9 +511,9 @@ function apriProspect(zid, id) {
   <label class="f">Gancio commerciale<textarea data-c="gancio">${esc(p.gancio)}</textarea></label>
   <label class="f">Note<textarea data-c="note">${esc(p.note)}</textarea></label>
   <div class="row mt"><button class="btn mini" id="elimina" style="color:var(--neg)">Elimina prospect</button></div>
-  <div class="barra-salva"><button class="btn annulla" id="annulla">Chiudi</button><button class="btn pri" id="salva" disabled>Nessuna modifica</button></div>`;
+  <div class="barra-salva"><button class="btn annulla neutro" id="annulla">Chiudi</button><button class="btn pri" id="salva" disabled>Nessuna modifica</button></div>`;
   const D = {}, DR = {}; let DB = null, sporco = false;
-  const segna = () => { sporco = true; $('#salva', f).disabled = false; $('#salva', f).textContent = 'Salva modifiche'; $('#salva', f).classList.remove('fatto'); $('#annulla', f).textContent = 'Annulla'; };
+  const segna = () => { sporco = true; statoBarra(f, 'sporco'); };
   const salva = () => {
     if (!sporco) return;
     const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
@@ -514,7 +525,7 @@ function apriProspect(zid, id) {
     }
     aggiorna(zid, id, campi);
     const za = ST.zone[zid].z; if (DB !== null && za.attivita[p.pid]) { za.attivita[p.pid].b = DB; za.attivita[p.pid].u = nuovoU(za.attivita[p.pid]); modificato(zid); }
-    sporco = false; toast('Salvato');
+    sporco = false;
   };
   const esci = () => { const dest = ST.indietro || '#prospect'; if (location.hash === dest) { chiudiFoglio(); render(); } else location.hash = dest; };
   const annulla = () => { if (sporco && !confirm('Annullare le modifiche non salvate?')) return; sporco = false; esci(); };
@@ -543,9 +554,9 @@ function apriProspect(zid, id) {
   $('#salva', f).onclick = () => {
     if (salva() === false) return;
     for (const k of Object.keys(D)) delete D[k]; for (const k of Object.keys(DR)) delete DR[k]; DB = null;
-    const b = $('#salva', f); b.disabled = true; b.classList.add('fatto'); b.textContent = '✓ Salvato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
-    $('#annulla', f).textContent = 'Chiudi';
+    statoBarra(f, 'salvato');
   };
+  if (opz.salvato) statoBarra(f, 'salvato', opz.salvato);
   $('#annulla', f).onclick = annulla;
   if ($('#vaiRegistro', f)) $('#vaiRegistro', f).onclick = (e) => { e.preventDefault(); $('#registroP', f).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('#registra', f).onclick = () => { if (salva() !== false) formContatto(zid, id); };
@@ -585,10 +596,20 @@ function formContatto(zid, id, preset = {}) {
     <div class="box"><div class="eb" style="margin-top:0">Dopo questo contatto</div>
     <label class="f">Prossima azione<input id="cPr" value="${esc(v.prossima)}"></label>
     <div class="due"><label class="f">Entro il<input id="cEn" type="date" value="${v.entro}"></label>
-    <label class="f">Nuovo stato<select id="cSt">${STATI.map((s) => `<option ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div></div>
+    <label class="f">Nuovo stato<select id="cSt">${STATI.map((s) => `<option value="${esc(s)}" ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div><div class="sub" id="cStNota"></div></div>
     <div class="barra-salva"><button class="btn annulla" id="annullaC">Annulla</button><button class="btn pri" id="salva">Salva contatto</button></div>`, () => annullaC());
-    const annullaC = () => { if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id); };
+    const sporcoC = () => v.esiti.length > 0 || !!v.emerso.trim();
+    const annullaC = () => {
+      leggi(); if (sporcoC() && !confirm('Uscire senza salvare il contatto?')) return;
+      if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id);
+    };
+    const aggiornaBarra = () => (v.esiti.length ? statoBarra(f, 'sporco', 'Salva contatto') : (statoBarra(f, sporcoC() ? 'sporco' : 'vuoto', 'Scegli almeno un esito'), ($('#salva', f).disabled = true)));
+    // avviso se il nuovo stato torna indietro rispetto a quello attuale
+    const avvisoStato = () => { const n = $('#cStNota', f); if (!n) return; const st = $('#cSt', f).value; n.innerHTML = !/^Chiuso|Scartato/.test(st) && STATI.indexOf(st) < STATI.indexOf(p.stato) ? `<span class="c-neg">Lo stato torna indietro: da «${esc(p.stato)}» a «${esc(st)}»</span>` : ''; };
     $('#annullaC').onclick = annullaC;
+    aggiornaBarra(); avvisoStato();
+    $('#cSt', f).onchange = avvisoStato;
+    $('#cEm', f).oninput = () => { v.emerso = $('#cEm', f).value; aggiornaBarra(); };
     const leggi = () => { v.data = $('#cData').value; v.interlocutore = $('#cInt').value; v.emerso = $('#cEm').value; v.prossima = $('#cPr').value; v.entro = $('#cEn').value; v.stato = $('#cSt').value; };
     f.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => {
       leggi();
@@ -607,8 +628,8 @@ function formContatto(zid, id, preset = {}) {
       const campi = { stato: v.stato, prossima: CHIUSI.includes(v.stato) ? '' : v.prossima, data_prossima: CHIUSI.includes(v.stato) ? '' : v.entro };
       if (v.interlocutore && !p.referente) campi.referente = maiuscole(v.interlocutore, true);
       if (preset.giro) campi.giro = { ...p.giro, fatto: true, fatto_il: v.data };
-      aggiorna(zid, id, campi); toast('Contatto salvato');
-      if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id);
+      aggiorna(zid, id, campi);
+      if (preset.ritorno) { toast('✓ Contatto salvato alle ' + oraAdesso()); location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id, { salvato: 'Contatto salvato' });
     };
   };
   disegna();
@@ -712,7 +733,7 @@ function formSpostaGiro() {
   <div class="lista">${tappe.map((x) => `<label class="card riga" style="cursor:pointer;opacity:${x.p.giro.fatto ? .55 : 1}"><span style="display:flex;gap:10px;align-items:center;min-width:0">
     <input type="checkbox" class="sCk" value="${esc(x.zid + '|' + x.p.id)}" ${x.p.giro.fatto ? 'disabled' : 'checked'} style="width:20px;height:20px">
     <span style="min-width:0"><span class="nome" style="display:block">${pallino(x.p.priorita)}${x.p.giro.ordine}. ${esc(x.p.nome)}</span><span class="sub">${esc(x.z.meta.quartiere)} · ${esc(x.p.giro.orario || '')}${x.p.giro.fatto ? ' · già consegnato' : ''}</span></span></span></label>`).join('')}</div>
-  <div class="barra-salva"><button class="btn annulla" id="sAnn">Annulla</button><button class="btn pri" id="sOk">Sposta tappe</button></div>`, () => { chiudiFoglio(); render(); });
+  <div class="barra-salva"><button class="btn annulla neutro" id="sAnn">Chiudi</button><button class="btn pri" id="sOk">Sposta tappe</button></div>`, () => { chiudiFoglio(); render(); });
   const cks = () => [...f.querySelectorAll('.sCk:not(:disabled)')];
   $('#sTutte', f).onclick = () => cks().forEach((c) => (c.checked = true));
   $('#sNessuna', f).onclick = () => cks().forEach((c) => (c.checked = false));
@@ -739,7 +760,7 @@ function formSpostaGiro() {
         .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
       modificato(zid);
     }
-    ST.giroData = a; toast(`${scelte.length} tappe spostate al ${gg(a)}`); chiudiFoglio(); render();
+    ST.giroData = a; toast(`✓ ${scelte.length} tappe spostate al ${gg(a)} alle ${oraAdesso()}`); chiudiFoglio(); render();
   };
 }
 function spostaTappa(zid, id, dir) {
@@ -880,8 +901,10 @@ function testiZona(zid) {
   <label class="f">Chi cerca… (es. un'agenzia immobiliare)<input data-m="frase_kw" value="${esc(m.frase_kw)}"></label>
   <div class="eb">Il prossimo passo</div>
   <label class="f">Introduzione<textarea data-pp="intro">${esc(pp.intro)}</textarea></label>
-  <label class="f">Invito<textarea data-pp="outro">${esc(pp.outro)}</textarea></label>`, () => apriZona(zid));
-  const salva = () => { m.u = ora(); modificato(zid); };
+  <label class="f">Invito<textarea data-pp="outro">${esc(pp.outro)}</textarea></label>
+  <div class="barra-salva"><button class="btn annulla neutro" id="tChiudi">Chiudi</button><button class="btn pri" disabled>Si salva a ogni modifica</button></div>`, () => apriZona(zid));
+  $('#tChiudi', f).onclick = () => apriZona(zid);
+  const salva = () => { m.u = ora(); modificato(zid); statoBarra(f, 'salvato'); };
   f.querySelectorAll('[data-m]').forEach((el) => (el.onchange = () => { m[el.dataset.m] = el.value; salva(); }));
   f.querySelectorAll('[data-pp]').forEach((el) => (el.onchange = () => { pp[el.dataset.pp] = el.value; salva(); }));
   f.querySelectorAll('[data-it]').forEach((el) => (el.onchange = () => { const [i, j] = el.dataset.it.split('|'); pp.items[i][j] = el.value; salva(); }));
