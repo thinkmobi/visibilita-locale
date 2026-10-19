@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.8.0';
+const VERSIONE = '1.8.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -68,7 +68,9 @@ const GH = {
   ok: () => !!(ST.cfg.owner && ST.cfg.repo && ST.cfg.token),
   url: (p) => `https://api.github.com/repos/${ST.cfg.owner}/${ST.cfg.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}`,
   async req(p, opz = {}, accept = 'application/vnd.github+json') {
-    const r = await fetch(GH.url(p), { cache: 'no-store', ...opz, headers: { Authorization: `Bearer ${ST.cfg.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', ...(opz.headers || {}) } });
+    // tempo massimo: su iPhone una richiesta partita prima di mettere l'app in background può restare appesa per sempre
+    const limite = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? { signal: AbortSignal.timeout(opz.method === 'PUT' ? 60000 : 25000) } : {};
+    const r = await fetch(GH.url(p), { cache: 'no-store', ...limite, ...opz, headers: { Authorization: `Bearer ${ST.cfg.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', ...(opz.headers || {}) } });
     if (r.status === 404) return null;
     if (!r.ok) { const e = new Error(`GitHub ${r.status}: ${(await r.text()).slice(0, 160)}`); e.status = r.status; throw e; }
     return r;
@@ -617,9 +619,17 @@ async function generaPdf(zid) {
     await GH.putJSON(`zone/${zid}/stampa.json`, job, sha, `Stampa giro ${ST.giroData}`);
     out.textContent = 'In generazione (circa un minuto)…';
     const t0 = ora();
+    // attesa breve che si interrompe quando l'app torna in primo piano: il controllo riparte subito
+    const pausa = (ms) => new Promise((ok) => {
+      const fine = () => { clearTimeout(t); document.removeEventListener('visibilitychange', vis); ok(); };
+      const vis = () => { if (!document.hidden) fine(); };
+      const t = setTimeout(fine, ms); document.addEventListener('visibilitychange', vis);
+    });
     while (ora() - t0 < 6 * 60000) {
-      await new Promise((r) => setTimeout(r, 12000));
+      await pausa(6000);
+      if (document.hidden) continue;
       const e = await GH.getJSON(`zone/${zid}/stampa/esito.json`).catch(() => null);
+      out.textContent = `In generazione… (${Math.round((ora() - t0) / 1000)} s)`;
       if (e && e.data.richiesta === job.richiesta) {
         if (e.data.errore) { out.innerHTML = `<span class="c-neg">${esc(e.data.errore)}</span>`; return; }
         const av = (e.data.avvisi || []).map((a) => `<div class="avviso">${esc(a)}</div>`).join('');
@@ -631,14 +641,18 @@ async function generaPdf(zid) {
     out.textContent = 'Ancora in coda: controlla tra poco da Zone → PDF.';
   } catch (e) { out.innerHTML = `<span class="c-neg">${esc(e.message)}</span>`; } finally { blocca(false); }
 }
-async function apriPdf(zid, file) {
+async function apriPdf(zid, file, w0) {
+  // la finestra si apre subito, al tocco: su iPhone (Safari e Chrome) un'apertura dopo l'attesa del download viene bloccata
+  const w = w0 || window.open('', '_blank');
+  if (w && !w0) w.document.write('<p style="font:16px system-ui;padding:24px">Scarico il PDF…</p>');
   toast('Scarico il PDF…');
   try {
-    const blob = await GH.getBlob(`zone/${zid}/${file}`); if (!blob) { toast('PDF non trovato'); return; }
+    const blob = await GH.getBlob(`zone/${zid}/${file}`); if (!blob) { toast('PDF non trovato'); if (w) w.close(); return; }
     const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-    const a = document.createElement('a'); a.href = url; a.download = file.split('/').pop(); document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (e) { toast(e.message); }
+    if (w) w.location.href = url;
+    else { const a = document.createElement('a'); a.href = url; a.download = file.split('/').pop(); document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e) { if (w) w.close(); toast(e.message); }
 }
 
 /* ---------- vista: zone ---------- */
@@ -670,7 +684,10 @@ function apriZona(zid) {
   f.querySelectorAll('[data-ord]').forEach((b) => (b.onclick = () => { ST.f.ordZ = b.dataset.ord; apriZona(zid); }));
   $('#soloNuove', f).onclick = () => { ST.f.soloNuove = !ST.f.soloNuove; apriZona(zid); };
   f.querySelectorAll('[data-nuovo]').forEach((b) => (b.onclick = () => nuovoProspect(zid, b.dataset.nuovo)));
-  $('#zPdf', f).onclick = async () => { try { const e = await GH.getJSON(`zone/${zid}/stampa/esito.json`); if (e && e.data.file) apriPdf(zid, e.data.file); else toast('Nessun PDF ancora'); } catch (e) { toast(e.message); } };
+  $('#zPdf', f).onclick = async () => {
+    const w = window.open('', '_blank'); if (w) w.document.write('<p style="font:16px system-ui;padding:24px">Cerco l\'ultimo PDF…</p>');
+    try { const e = await GH.getJSON(`zone/${zid}/stampa/esito.json`); if (e && e.data.file) apriPdf(zid, e.data.file, w); else { if (w) w.close(); toast('Nessun PDF ancora'); } } catch (e) { if (w) w.close(); toast(e.message); }
+  };
   $('#zTesti', f).onclick = () => testiZona(zid);
   $('#zSiti', f).onclick = async () => {
     if (!GH.ok()) { toast('Serve il collegamento GitHub'); return; }
