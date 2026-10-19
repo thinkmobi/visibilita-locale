@@ -1,17 +1,17 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.9.0';
+const VERSIONE = '1.9.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
-const ESITI = ['Nessuna risposta', 'Segreteria', 'Richiamare', 'Report consegnato', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
+const ESITI = ['Nessuna risposta', 'Segreteria', 'Richiamare', 'Report consegnato', 'Fare report completo', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
 const prossimoOrdine = (zid, data) => Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).reduce((m, q) => Math.max(m, q.giro.ordine || 0), 0) + 1;
 function rinumera(zid, data) {
   Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).sort((x, y) => (x.giro.ordine || 99) - (y.giro.ordine || 99))
     .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
 }
-const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Report consegnato': 'Contattato',
+const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Report consegnato': 'Contattato', 'Fare report completo': 'In attesa di risposta',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
   'Non interessato': 'Chiuso perso', 'Firmato': 'Chiuso vinto' };
 /* lo stato avanza con l'esito, non torna indietro (es. "Nessuna risposta" su un prospect in trattativa) */
@@ -54,7 +54,7 @@ function pivaDaSiti() {
 const esitiDi = (r) => r.esiti || (r.esito ? r.esito.split(' · ') : []);
 const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
-  'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
+  'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Fare report completo': ['Preparare e consegnare il report completo', 2], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
@@ -63,7 +63,7 @@ const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'moto
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
-const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, timer: {}, pdf: {}, pdfMsg: {} };
+const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, fg: { tappa: '', prio: '' }, timer: {}, pdf: {}, pdfMsg: {} };
 
 /* ---------- utilità ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -337,14 +337,30 @@ function vOggi() {
   const sel = ST.f.kpi && K[ST.f.kpi];
   const kpi = `<div class="kpi">${Object.entries(K).map(([k, [arr, lab, c]]) => `<button data-kpi="${k}" class="${ST.f.kpi === k ? 'sel' : ''}"><b class="${c}">${arr.length}</b><span>${lab}</span></button>`).join('')}</div>`;
   if (sel) return `${kpi}<div class="eb">${esc(sel[1])}</div><div class="lista">${sel[0].map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect in questa lista.</div>'}</div>`;
-  // vista predefinita: il giro della data odierna, nell'ordine delle tappe
-  const giro = tt.filter((x) => x.p.giro && x.p.giro.data === oggi()).sort((a, b) => (a.zid + String(a.p.giro.ordine || 99).padStart(3, '0')).localeCompare(b.zid + String(b.p.giro.ordine || 99).padStart(3, '0')));
-  const fatte = giro.filter((x) => x.p.giro.fatto).length;
-  const tappa = (x) => `<div class="riga" style="margin-top:4px"><span class="sub">${esc(x.p.giro.orario || '')}${x.p.giro.orario ? ' · ' : ''}tappa ${x.p.giro.ordine || ''}</span>${x.p.giro.fatto ? '<span class="stato-tappa consegnata">✓ Consegnato</span>' : '<span class="stato-tappa">Da visitare</span>'}</div>`;
+  // vista predefinita: solo chi va ancora contattato oggi (tappe del giro di oggi + azioni in scadenza oggi);
+  // chi ha già un contatto registrato oggi o la tappa consegnata esce dalla lista
+  const d = oggi();
+  const sentitoOggi = (x) => registro(x.zid, x.p.id).some((r) => r.data === d) || (x.p.giro && x.p.giro.data === d && x.p.giro.fatto);
+  const ordGiro = (a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99);
+  const giro = tt.filter((x) => x.p.giro && x.p.giro.data === d).sort(ordGiro);
+  const numTappa = {}; const cont = {}; giro.forEach((x) => (numTappa[x.zid + '|' + x.p.id] = cont[x.zid] = (cont[x.zid] || 0) + 1));
+  const giroDaFare = giro.filter((x) => !sentitoOggi(x) && aperto(x.p));
+  const inGiro = new Set(giro.map((x) => x.zid + '|' + x.p.id));
+  const richiami = ap.filter((x) => x.p.data_prossima === d && !inGiro.has(x.zid + '|' + x.p.id) && !sentitoOggi(x))
+    .sort((a, b) => prioRank(a.p) - prioRank(b.p));
+  const fatti = tt.filter(sentitoOggi);
+  const ultimoOggi = (x) => registro(x.zid, x.p.id).find((r) => r.data === d);
+  const tappa = (x) => `<div class="riga" style="margin-top:4px"><span class="sub">${esc(x.p.giro.orario || '')}${x.p.giro.orario ? ' · ' : ''}tappa ${numTappa[x.zid + '|' + x.p.id] || ''}</span><span class="stato-tappa">Da visitare</span></div>`;
+  const esitoOggi = (x) => { const r = ultimoOggi(x); return `<div class="riga" style="margin-top:4px">${x.p.giro && x.p.giro.data === d && x.p.giro.fatto ? '<span class="stato-tappa consegnata">✓ Consegnato</span>' : ''}${r ? `<span class="sub">Oggi: ${esc(r.esito)}</span>` : ''}</div>`; };
+  const vuoto = !giroDaFare.length && !richiami.length;
   return `${kpi}
-  <div class="eb">Giro di oggi · ${ggLungo(oggi())}${giro.length ? ` · ${giro.length} tappe · ${fatte} consegnate` : ''}</div>
-  ${giro.length ? `<div class="row" style="margin-bottom:8px"><a class="btn mini" href="#giro">Apri il giro</a></div>` : ''}
-  <div class="lista">${giro.map((x) => cardProspect(x, tappa(x))).join('') || '<div class="vuoto">Nessun giro previsto per oggi.</div>'}</div>`;
+  <div class="eb">Da fare oggi · ${ggLungo(d)} · ${giroDaFare.length + richiami.length} da contattare${fatti.length ? ` · ${fatti.length} già sentiti` : ''}</div>
+  ${giro.length ? `<div class="row" style="margin-bottom:8px"><a class="btn mini" href="#giro">Apri il giro (${giro.length} tappe)</a></div>` : ''}
+  ${giroDaFare.length ? `<div class="sub" style="margin:2px 0 6px">Giro di oggi</div><div class="lista">${giroDaFare.map((x) => cardProspect(x, tappa(x))).join('')}</div>` : ''}
+  ${richiami.length ? `<div class="sub" style="margin:10px 0 6px">Azioni in scadenza oggi</div><div class="lista">${richiami.map((x) => cardProspect(x)).join('')}</div>` : ''}
+  ${vuoto ? `<div class="vuoto">${giro.length || fatti.length ? 'Tutti sentiti per oggi.' : 'Niente in programma per oggi.'}</div>` : ''}
+  ${fatti.length ? `<div class="row mt"><button class="btn mini" id="oFatti">${ST.f.fatti ? 'Nascondi' : 'Mostra'} ${fatti.length === 1 ? 'chi è già stato sentito' : `i ${fatti.length} già sentiti`} oggi</button></div>
+  ${ST.f.fatti ? `<div class="lista mt">${fatti.map((x) => cardProspect(x, esitoOggi(x))).join('')}</div>` : ''}` : ''}`;
 }
 function benvenuto() {
   return `<div class="box"><h2>Benvenuto</h2><p>Nessun dato su questo dispositivo.</p>
@@ -592,28 +608,40 @@ function vGiro() {
   const date = [...new Set(tt.map((x) => x.p.giro.data))].sort();
   if (!ST.giroData) ST.giroData = date.find((d) => d >= oggi()) || date[date.length - 1] || oggi();
   const d = ST.giroData;
-  const tappe = tt.filter((x) => x.p.giro.data === d).sort((a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
-  const perZona = {}; tappe.forEach((x) => (perZona[x.zid] = perZona[x.zid] || []).push(x));
+  const tutte = tt.filter((x) => x.p.giro.data === d).sort((a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
+  // numero di tappa fisso (posizione nel giro della zona), anche quando i filtri nascondono qualcosa
+  const numTappa = {}; const cont = {}; tutte.forEach((x) => (numTappa[x.zid + '|' + x.p.id] = cont[x.zid] = (cont[x.zid] || 0) + 1));
+  const fg = ST.fg;
+  const contattata = (x) => registro(x.zid, x.p.id).some((r) => r.data === d);
+  const passa = (x) => (!fg.tappa || (fg.tappa === 'da' ? !x.p.giro.fatto && !contattata(x) : fg.tappa === 'fatte' ? x.p.giro.fatto : fg.tappa === 'contattate' ? contattata(x) && !x.p.giro.fatto : true))
+    && (!fg.prio || x.p.priorita === fg.prio) && (!fg.nr || nonRiv(x.z, x.p)) && (!fg.pg || x.p.pg === 'assente');
+  const tappe = tutte.filter(passa);
+  const perZona = {}; tutte.forEach((x) => (perZona[x.zid] = perZona[x.zid] || [])); tappe.forEach((x) => perZona[x.zid].push(x));
+  const nF = (fn) => tutte.filter(fn).length;
+  const chipG = (k, v, lab) => `<button class="chip ${fg[k] === v ? 'on' : ''}" data-fg="${k}" data-v="${esc(v)}">${lab}</button>`;
+  const filtriGiro = tutte.length ? `<div class="filtri mt">${chipG('tappa', '', `Tutte (${tutte.length})`)}${chipG('tappa', 'da', `Da visitare (${nF((x) => !x.p.giro.fatto && !contattata(x))})`)}${chipG('tappa', 'contattate', `Contattate (${nF((x) => contattata(x) && !x.p.giro.fatto)})`)}${chipG('tappa', 'fatte', `Consegnate (${nF((x) => x.p.giro.fatto)})`)}</div>
+  <div class="filtri">${chipG('prio', '', 'Ogni priorità')}${PRIORITA.filter((s) => tutte.some((x) => x.p.priorita === s)).map((s) => chipG('prio', s, prioHtml(s))).join('')}<button class="chip chip-nr ${fg.nr ? 'on' : ''}" data-fgt="nr">Non rivendicate (${nF((x) => nonRiv(x.z, x.p))})</button><button class="chip chip-pg ${fg.pg ? 'on' : ''}" data-fgt="pg">Assenti su PG (${nF((x) => x.p.pg === 'assente')})</button></div>
+  ${tappe.length < tutte.length ? `<div class="sub" style="margin:2px 0 4px">${tappe.length} di ${tutte.length} tappe con questi filtri</div>` : ''}` : '';
   const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
   // anteprima su mappa: tappe con coordinate, numerate come nella lista
-  const nInZona = {};
-  ST.mappaGiro = tappe.map((x) => { const a = x.z.attivita[x.p.pid] || {}; const n = (nInZona[x.zid] = (nInZona[x.zid] || 0) + 1); return a.la && a.lo ? { zid: x.zid, id: x.p.id, n, nome: x.p.nome, fatto: !!x.p.giro.fatto, la: a.la, lo: a.lo } : null; }).filter(Boolean);
+  ST.mappaGiro = tappe.map((x) => { const a = x.z.attivita[x.p.pid] || {}; const n = numTappa[x.zid + '|' + x.p.id]; return a.la && a.lo ? { zid: x.zid, id: x.p.id, n, nome: x.p.nome, fatto: !!x.p.giro.fatto, la: a.la, lo: a.lo } : null; }).filter(Boolean);
   const senzaCoord = tappe.length - ST.mappaGiro.length;
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
-  return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tappe.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
+  return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tutte.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
   <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${esc(x)}">${esc(ggLungo(x))}</button>`).join('')}</div>
+  ${filtriGiro}
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
   ${ST.mappaGiro.length ? `<div class="mappa-giro mt" id="mappaGiro" role="img" aria-label="Mappa delle tappe del giro"></div>
   <div class="sub mappa-legenda"><span class="mg-pin">1</span> da visitare <span class="mg-pin fatto">✓</span> consegnato${senzaCoord ? ` · ${senzaCoord} tappe senza posizione` : ''}</div>` : ''}
-  ${Object.entries(perZona).map(([zid, arr]) => `
-    <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${arr.length} tappe pianificate · ${arr.filter((x) => x.p.giro.fatto).length} consegnate</div>
-    <div class="lista">${arr.map((x, i) => {
+  ${Object.entries(perZona).map(([zid, arr]) => { const tutteZ = tutte.filter((x) => x.zid === zid); return `
+    <div class="eb">${esc(ST.zone[zid].z.meta.quartiere)} · ${tutteZ.length} tappe pianificate · ${tutteZ.filter((x) => x.p.giro.fatto).length} consegnate</div>
+    <div class="lista">${arr.map((x) => {
       const ind = x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a || '';
       const ref = [x.p.referente, x.p.telefono].filter(Boolean).join(' · ');
       return `<div class="card tappa ${classeCard(x.p)} ${x.p.giro.fatto ? 'ok-fatto' : ''}">
-      <div class="tappa-testa"><span class="num">${x.p.giro.fatto ? '✓' : i + 1}</span>
-      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : '<span class="stato-tappa">Da visitare</span>'}
+      <div class="tappa-testa"><span class="num">${x.p.giro.fatto ? '✓' : numTappa[zid + '|' + x.p.id]}</span>
+      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : contattata(x) ? `<span class="stato-tappa">Contattato · ${esc((registro(zid, x.p.id).find((r) => r.data === d) || {}).esito || '')}</span>` : '<span class="stato-tappa">Da visitare</span>'}
       ${x.p.report && x.p.report.includi === false ? '<span class="sub">senza report</span>' : ''}
       ${sceltaOra(`data-ora="${zid}|${x.p.id}"`, x.p.giro.orario || '')}
       <span class="ordine"><button data-su="${zid}|${x.p.id}" aria-label="Su">↑</button><button data-giu="${zid}|${x.p.id}" aria-label="Giù">↓</button></span></div>
@@ -621,16 +649,17 @@ function vGiro() {
       <div class="row mt"><a class="btn mini" href="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(ind)}" target="_blank" rel="noopener">Naviga</a>
       ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Riapri tappa</button>` : `<button class="btn mini segna" data-fatto="${zid}|${x.p.id}">Segna consegnato</button>`}
       <button class="btn mini" data-togli="${zid}|${x.p.id}" title="Togli dal giro">✕</button></div></div>`;
-    }).join('')}</div>
+    }).join('') || '<div class="vuoto">Nessuna tappa con questi filtri.</div>'}</div>
     ${(() => {
-      // stessa selezione del PDF: solo le tappe presenti nella scansione e non escluse a mano
+      // stessa selezione del PDF (tutte le tappe, filtri esclusi): solo le tappe presenti nella scansione e non escluse a mano
+      const arr = tutteZ;
       const stampa = arr.filter((x) => x.p.pid && x.z.attivita[x.p.pid] && !(x.p.report && x.p.report.includi === false));
       const fuori = arr.filter((x) => !(x.p.pid && x.z.attivita[x.p.pid]));
       return `<div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${stampa.length} analisi · ${Math.ceil(stampa.length / 2)} fogli A4</span></div>
       ${fuori.length ? `<div class="avviso">Senza pagina nel PDF perché non compaiono nella scansione: ${fuori.map((x) => esc(x.p.nome)).join(', ')}. Porta per loro la mappa della zona o un'analisi a parte.</div>` : ''}`;
     })()}
     <div class="sub">Il PDF esce nell'ordine del giro: taglia la risma a metà e metti la pila inferiore sotto quella superiore.</div>
-    <div class="row mt"><button class="btn pri" data-stampa="${zid}" ${ST.pdf[zid] ? 'disabled' : ''}>Genera PDF</button><span id="st-${zid}" class="sub">${ST.pdfMsg[zid] || ''}</span></div></div>`).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
+    <div class="row mt"><button class="btn pri" data-stampa="${zid}" ${ST.pdf[zid] ? 'disabled' : ''}>Genera PDF</button><span id="st-${zid}" class="sub">${ST.pdfMsg[zid] || ''}</span></div></div>`; }).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
 }
 /* sposta in blocco le tappe di un giro a un'altra data: tutte o solo quelle scelte */
 function formSpostaGiro() {
@@ -962,6 +991,7 @@ function scaricaFile(testo, nome, tipo) { const url = URL.createObjectURL(new Bl
 function legaVista(v) {
   const V = $('#vista');
   if (v === 'oggi') V.querySelectorAll('[data-kpi]').forEach((b) => (b.onclick = () => { ST.f.kpi = ST.f.kpi === b.dataset.kpi ? '' : b.dataset.kpi; render(); }));
+  if (v === 'oggi' && $('#oFatti')) $('#oFatti').onclick = () => { ST.f.fatti = !ST.f.fatti; render(); };
   if (v === 'prospect') {
     V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; render(); }));
     $('#filtroNR').onclick = () => { ST.f.nr = !ST.f.nr; render(); };
@@ -977,6 +1007,8 @@ function legaVista(v) {
     $('#gAgg').onclick = scegliTappa;
     const gs = $('#gSposta'); if (gs) gs.onclick = formSpostaGiro;
     V.querySelectorAll('[data-gd]').forEach((b) => (b.onclick = () => { ST.giroData = b.dataset.gd; render(); }));
+    V.querySelectorAll('[data-fg]').forEach((b) => (b.onclick = () => { ST.fg[b.dataset.fg] = ST.fg[b.dataset.fg] === b.dataset.v ? '' : b.dataset.v; render(); }));
+    V.querySelectorAll('[data-fgt]').forEach((b) => (b.onclick = () => { ST.fg[b.dataset.fgt] = !ST.fg[b.dataset.fgt]; render(); }));
     V.querySelectorAll('[data-su],[data-giu]').forEach((b) => (b.onclick = () => { const [zid, id] = (b.dataset.su || b.dataset.giu).split('|'); spostaTappa(zid, id, b.dataset.su ? -1 : 1); }));
     V.querySelectorAll('[data-ora]').forEach((el) => (el.onchange = () => { const [zid, id] = el.dataset.ora.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, orario: el.value } }); }));
     V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio in agenzia', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
