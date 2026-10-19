@@ -1,25 +1,32 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.7.2';
+const VERSIONE = '1.7.3';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
 const ESITI = ['Nessuna risposta', 'Segreteria', 'Richiamare', 'Report consegnato', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
+const prossimoOrdine = (zid, data) => Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).reduce((m, q) => Math.max(m, q.giro.ordine || 0), 0) + 1;
+function rinumera(zid, data) {
+  Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).sort((x, y) => (x.giro.ordine || 99) - (y.giro.ordine || 99))
+    .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = ora(); } });
+}
 const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Report consegnato': 'Contattato',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
   'Non interessato': 'Chiuso perso', 'Firmato': 'Chiuso vinto' };
+/* lo stato avanza con l'esito, non torna indietro (es. "Nessuna risposta" su un prospect in trattativa) */
+const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
 const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
-const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt',
+const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt', 'motore/salva.sh', 'motore/esegui_import.sh', 'motore/esegui_report.sh', 'motore/esegui_siti.sh',
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
-const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, timer: {} };
+const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, timer: {}, pdf: {}, pdfMsg: {} };
 
 /* ---------- utilità ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -159,7 +166,7 @@ async function scarica() {
     ST.ultimo = ora();
     // mentre si scrive in un campo la vista non si ricostruisce: si aggiorna appena il campo perde il fuoco
     const att = document.activeElement;
-    if (att && /^(INPUT|TEXTAREA|SELECT)$/.test(att.tagName) && $('#vista').contains(att)) ST.daRender = true; else render();
+    if (!$('#foglio').hidden || (att && /^(INPUT|TEXTAREA|SELECT)$/.test(att.tagName) && $('#vista').contains(att))) ST.daRender = true; else render();
   } catch (e) { console.error(e); statoSync('err', e.status === 401 ? 'Token non valido' : 'Non raggiungibile'); }
 }
 
@@ -191,7 +198,7 @@ function render() {
   if (vista === 'p' && a && b) apriProspect(a, b);
   if (vista === 'z' && a) apriZona(a);
 }
-document.addEventListener('focusout', () => setTimeout(() => { if (ST.daRender && !(document.activeElement && $('#vista').contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))) { ST.daRender = false; ST.restaScroll = true; render(); } }, 50));
+document.addEventListener('focusout', () => setTimeout(() => { if (ST.daRender && $('#foglio').hidden && !(document.activeElement && $('#vista').contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))) { ST.daRender = false; ST.restaScroll = true; render(); } }, 50));
 window.addEventListener('hashchange', (e) => { const da = (e.oldURL.split('#')[1] || 'oggi'); if (VISTE[da.split('/')[0]]) ST.indietro = '#' + da; if (!/^#(p|z)\//.test(location.hash)) chiudiFoglio(); render(); });
 
 /* ---------- vista: oggi ---------- */
@@ -318,7 +325,11 @@ function apriFoglio(titolo, html, onClose) {
   $('#chiudi').onclick = () => { if (onClose) onClose(); else history.back(); };
   return f;
 }
-function chiudiFoglio() { const f = $('#foglio'); f.hidden = true; f.innerHTML = ''; document.body.style.overflow = ''; }
+function chiudiFoglio() {
+  const f = $('#foglio'); f.hidden = true; f.innerHTML = ''; document.body.style.overflow = '';
+  // aggiornamenti arrivati mentre il foglio era aperto: si mostrano adesso
+  if (ST.daRender) { ST.daRender = false; ST.restaScroll = true; setTimeout(render, 0); }
+}
 function minigriglia(z, pid) {
   const m = L.metriche(z, pid); const n = z.meta.griglia || Math.round(Math.sqrt(m.N));
   // punti ordinati da nord-ovest a sud-est per la visualizzazione
@@ -392,10 +403,10 @@ function apriProspect(zid, id) {
     if (!sporco) return;
     const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
     aggiorna(zid, id, campi);
-    if (DB !== null && z.attivita[p.pid]) { z.attivita[p.pid].b = DB; z.attivita[p.pid].u = ora(); modificato(zid); }
+    const za = ST.zone[zid].z; if (DB !== null && za.attivita[p.pid]) { za.attivita[p.pid].b = DB; za.attivita[p.pid].u = ora(); modificato(zid); }
     sporco = false; toast('Salvato');
   };
-  const esci = () => { location.hash = ST.indietro || '#prospect'; };
+  const esci = () => { const dest = ST.indietro || '#prospect'; if (location.hash === dest) { chiudiFoglio(); render(); } else location.hash = dest; };
   const annulla = () => { if (sporco && !confirm('Annullare le modifiche non salvate?')) return; sporco = false; esci(); };
   const f = apriFoglio(p.nome, html, annulla);
   f.querySelectorAll('[data-c]').forEach((el) => el.addEventListener('input', () => {
@@ -427,7 +438,7 @@ function apriProspect(zid, id) {
 function formContatto(zid, id, preset = {}) {
   const p = ST.zone[zid].z.prospect[id];
   const v = { canale: preset.canale || 'Telefono', esito: preset.esito || '', interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
-  if (ESITO_STATO[v.esito]) v.stato = ESITO_STATO[v.esito];
+  v.stato = statoDaEsito(p.stato, v.esito);
   if (ESITO_AZIONE[v.esito]) { v.prossima = ESITO_AZIONE[v.esito][0]; v.entro = piuGiorni(ESITO_AZIONE[v.esito][1], v.data); }
   const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${v[k] === o ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   const disegna = () => {
@@ -440,13 +451,14 @@ function formContatto(zid, id, preset = {}) {
     <label class="f">Prossima azione<input id="cPr" value="${esc(v.prossima)}"></label>
     <div class="due"><label class="f">Entro il<input id="cEn" type="date" value="${v.entro}"></label>
     <label class="f">Nuovo stato<select id="cSt">${STATI.map((s) => `<option ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div></div>
-    <div class="barra-salva"><button class="btn annulla" id="annullaC">Annulla</button><button class="btn pri" id="salva">Salva contatto</button></div>`, () => apriProspect(zid, id));
-    $('#annullaC').onclick = () => { if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id); };
+    <div class="barra-salva"><button class="btn annulla" id="annullaC">Annulla</button><button class="btn pri" id="salva">Salva contatto</button></div>`, () => annullaC());
+    const annullaC = () => { if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id); };
+    $('#annullaC').onclick = annullaC;
     const leggi = () => { v.data = $('#cData').value; v.interlocutore = $('#cInt').value; v.emerso = $('#cEm').value; v.prossima = $('#cPr').value; v.entro = $('#cEn').value; v.stato = $('#cSt').value; };
     f.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => {
       leggi(); v[b.dataset.k] = b.dataset.v;
       if (b.dataset.k === 'esito') { // proposta automatica, modificabile
-        if (ESITO_STATO[v.esito]) v.stato = ESITO_STATO[v.esito];
+        v.stato = statoDaEsito(p.stato, v.esito);
         const az = ESITO_AZIONE[v.esito]; if (az) { v.prossima = az[0]; v.entro = piuGiorni(az[1], v.data); } else { v.prossima = ''; v.entro = ''; }
       }
       disegna();
@@ -496,9 +508,15 @@ function vGiro() {
       ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Riapri tappa</button>` : `<button class="btn mini segna" data-fatto="${zid}|${x.p.id}">Segna consegnato</button>`}
       <button class="btn mini" data-togli="${zid}|${x.p.id}" title="Togli dal giro">✕</button></div></div>`;
     }).join('')}</div>
-    <div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length} analisi · ${Math.ceil(arr.filter((x) => x.p.pid && !(x.p.report && x.p.report.includi === false)).length / 2)} fogli A4</span></div>
+    ${(() => {
+      // stessa selezione del PDF: solo le tappe presenti nella scansione e non escluse a mano
+      const stampa = arr.filter((x) => x.p.pid && x.z.attivita[x.p.pid] && !(x.p.report && x.p.report.includi === false));
+      const fuori = arr.filter((x) => !(x.p.pid && x.z.attivita[x.p.pid]));
+      return `<div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${stampa.length} analisi · ${Math.ceil(stampa.length / 2)} fogli A4</span></div>
+      ${fuori.length ? `<div class="avviso">Senza pagina nel PDF perché non compaiono nella scansione: ${fuori.map((x) => esc(x.p.nome)).join(', ')}. Porta per loro la mappa della zona o un'analisi a parte.</div>` : ''}`;
+    })()}
     <div class="sub">Il PDF esce nell'ordine del giro: taglia la risma a metà e metti la pila inferiore sotto quella superiore.</div>
-    <div class="row mt"><button class="btn pri" data-stampa="${zid}">Genera PDF</button><span id="st-${zid}" class="sub"></span></div></div>`).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
+    <div class="row mt"><button class="btn pri" data-stampa="${zid}" ${ST.pdf[zid] ? 'disabled' : ''}>Genera PDF</button><span id="st-${zid}" class="sub">${ST.pdfMsg[zid] || ''}</span></div></div>`).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
 }
 /* sposta in blocco le tappe di un giro a un'altra data: tutte o solo quelle scelte */
 function formSpostaGiro() {
@@ -526,8 +544,7 @@ function formSpostaGiro() {
     for (const [zid, id] of scelte) {
       const z = ST.zone[zid].z, p = z.prospect[id];
       // le tappe spostate si accodano a quelle già previste nella nuova data
-      const giaLi = Object.values(z.prospect).filter((q) => !q.del && q.giro && q.giro.data === a).length;
-      p.giro = { ...p.giro, data: a, ordine: giaLi + 1 };
+      p.giro = { ...p.giro, data: a, ordine: prossimoOrdine(zid, a) };
       if (conAz) {
         if (p.data_prossima === da) p.data_prossima = a;
         if (p.visita_entro) p.visita_entro = piuGiorni(delta, p.visita_entro);
@@ -558,18 +575,23 @@ function scegliTappa() {
   $('#tq').oninput = lista; lista();
   f.addEventListener('click', (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
-    const [zid, id] = b.dataset.add.split('|'); const n = tutti().filter((x) => x.zid === zid && x.p.giro && x.p.giro.data === ST.giroData).length;
-    aggiorna(zid, id, { giro: { data: ST.giroData, ordine: n + 1, orario: '', fatto: false } }); b.remove(); toast('Aggiunto');
+    const [zid, id] = b.dataset.add.split('|');
+    aggiorna(zid, id, { giro: { data: ST.giroData, ordine: prossimoOrdine(zid, ST.giroData), orario: '', fatto: false } }); b.remove(); toast('Aggiunto');
   });
 }
 async function generaPdf(zid) {
-  const out = $('#st-' + zid);
+  if (ST.pdf[zid]) return;   // una richiesta alla volta per zona
+  // lo stato vive in ST: se la vista si ricostruisce durante l'attesa il messaggio e il pulsante "Apri" restano
+  const out = { set textContent(t) { scrivi(esc(t)); }, set innerHTML(h) { scrivi(h); } };
+  const scrivi = (h) => { ST.pdfMsg[zid] = h; const o = $('#st-' + zid); if (o) o.innerHTML = h; };
+  const blocca = (on) => { ST.pdf[zid] = on; const b = document.querySelector(`[data-stampa="${zid}"]`); if (b) b.disabled = on; };
   if (!GH.ok()) { toast('Serve il collegamento GitHub'); return; }
   const z = ST.zone[zid].z;
   const ps = tutti().filter((x) => x.zid === zid && x.p.giro && x.p.giro.data === ST.giroData && x.p.pid && z.attivita[x.p.pid] && !(x.p.report && x.p.report.includi === false))
     .sort((a, b) => (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99)).map((x) => x.p);
   if (!ps.length) { toast('Nessuna analisi da stampare'); return; }
   const job = L.jobStampa(z, ps, { data: z.meta.data, firma: ST.conf.firma && ST.conf.firma.nome ? ST.conf.firma : null });
+  blocca(true);
   try {
     out.textContent = 'Invio…';
     await invia(zid);
@@ -584,12 +606,12 @@ async function generaPdf(zid) {
         if (e.data.errore) { out.innerHTML = `<span class="c-neg">${esc(e.data.errore)}</span>`; return; }
         const av = (e.data.avvisi || []).map((a) => `<div class="avviso">${esc(a)}</div>`).join('');
         out.innerHTML = `<button class="btn mini ink" data-pdf="${zid}|${esc(e.data.file)}">Apri ${esc(e.data.file.split('/').pop())}</button>${av}`;
-        z.prospect && ps.forEach((p) => { if (!p.report_prodotto) { p.report_prodotto = oggi(); p.u = ora(); } }); modificato(zid);
+        const za = ST.zone[zid].z; ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); p.u = ora(); } }); modificato(zid);
         return;
       }
     }
     out.textContent = 'Ancora in coda: controlla tra poco da Zone → PDF.';
-  } catch (e) { out.innerHTML = `<span class="c-neg">${esc(e.message)}</span>`; }
+  } catch (e) { out.innerHTML = `<span class="c-neg">${esc(e.message)}</span>`; } finally { blocca(false); }
 }
 async function apriPdf(zid, file) {
   toast('Scarico il PDF…');
@@ -821,7 +843,7 @@ function legaVista(v) {
     V.querySelectorAll('[data-ora]').forEach((el) => (el.onchange = () => { const [zid, id] = el.dataset.ora.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, orario: el.value } }); }));
     V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio in agenzia', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
     V.querySelectorAll('[data-annulla]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.annulla.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, fatto: false, fatto_il: '' } }); ST.restaScroll = true; render(); }));
-    V.querySelectorAll('[data-togli]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.togli.split('|'); aggiorna(zid, id, { giro: {} }); ST.restaScroll = true; render(); }));
+    V.querySelectorAll('[data-togli]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.togli.split('|'); const d = (ST.zone[zid].z.prospect[id].giro || {}).data; aggiorna(zid, id, { giro: {} }); rinumera(zid, d); modificato(zid); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-stampa]').forEach((b) => (b.onclick = () => generaPdf(b.dataset.stampa)));
   }
   if (v === 'zone') {

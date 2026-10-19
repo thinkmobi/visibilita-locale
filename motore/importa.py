@@ -46,6 +46,16 @@ def _post(chiave, api_key, modo):
 
 
 def chiedi_report(chiave, api_key, attese=20):
+    # la risposta resta in cache per il run: se il salvataggio va in conflitto, l'import si ripete senza richiamare Local Falcon
+    cache = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), f"lf-{chiave}.json")
+    if os.path.exists(cache):
+        return json.load(open(cache, encoding="utf-8"))
+    d = _chiedi_report(chiave, api_key, attese)
+    json.dump(d, open(cache, "w", encoding="utf-8"))
+    return d
+
+
+def _chiedi_report(chiave, api_key, attese=20):
     api_key = api_key.strip()
     modo, ultimo = None, None
     for _ in range(attese):
@@ -86,6 +96,7 @@ def zona_da_report(d, rq, esistente=None):
         "prossimo_passo": meta.get("prossimo_passo") or rq.get("prossimo_passo") or PROSSIMO_PASSO,
         "u": int(time.time() * 1000)})
     att = z.get("attivita") or {}
+    ora = int(time.time() * 1000)   # i dati appena importati vincono sulle copie locali dell'app
     punti = []
     for p in d["data_points"]:
         ris = sorted(p.get("results") or [], key=lambda q: int(q["rank"]))
@@ -98,7 +109,7 @@ def zona_da_report(d, rq, esistente=None):
                         "t": q.get("phone") or "", "w": q.get("display_url") or q.get("url") or "",
                         # "claimed" di Local Falcon non è affidabile (13 schede su 13 smentite il 18/10/2026):
                         # si tiene solo un dato verificato a parte (cv), altrimenti resta sconosciuto
-                        "c": vecchio.get("c") if vecchio.get("cv") else None, "cv": vecchio.get("cv"), "cat": list((q.get("categories") or {}).values())}
+                        "c": vecchio.get("c") if vecchio.get("cv") else None, "cv": vecchio.get("cv"), "u": ora, "cat": list((q.get("categories") or {}).values())}
         punti.append([num(p["lat"]), num(p["lng"]), [q["place_id"] for q in ris]])
     z.update({"meta": meta, "attivita": att, "punti": punti})
     return z

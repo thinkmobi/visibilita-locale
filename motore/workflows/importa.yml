@@ -7,7 +7,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: dati
+  group: dati-importa
   cancel-in-progress: false
 jobs:
   importa:
@@ -18,20 +18,8 @@ jobs:
       - name: Importa le richieste nuove
         env:
           LOCALFALCON_API_KEY: ${{ secrets.LOCALFALCON_API_KEY }}
-        run: |
-          for rq in zone/*/richiesta.json; do
-            dir=$(dirname "$rq")
-            if python3 -c "import json,sys;r=json.load(open('$rq'));e=json.load(open('$dir/importa-esito.json'));sys.exit(0 if e.get('report_key')==r.get('report_key') and e.get('stato')=='ok' else 1)" 2>/dev/null; then
-              echo "già importata: $dir"; continue
-            fi
-            python3 motore/importa.py "$rq"
-            [ -f "$dir/zona.json" ] && python3 motore/siti.py "$dir" || true   # controllo dei siti subito dopo l'import
-          done
+        run: bash motore/esegui_import.sh
       - name: Salva nel repository
-        run: |
-          git config user.name "visibilita-bot"
-          git config user.email "visibilita-bot@users.noreply.github.com"
-          git add zone
-          git diff --cached --quiet && exit 0
-          git commit -m "Importa scansione Local Falcon"
-          for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done
+        env:
+          LOCALFALCON_API_KEY: ${{ secrets.LOCALFALCON_API_KEY }}
+        run: bash motore/salva.sh "Importa scansione Local Falcon" "bash motore/esegui_import.sh"

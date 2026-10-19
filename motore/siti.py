@@ -65,6 +65,8 @@ def visita(url):
                     break
                 ultimo = {"stato": "irraggiungibile", "nota": testo[:120]}
                 break
+            except Exception as e:   # URL con spazi, accenti o malformati: non deve fermare il controllo della zona
+                return {"stato": "dubbio", "nota": f"indirizzo non controllabile: {str(e)[:80]}", "ms": int((time.time() - t0) * 1000)}
     ultimo = ultimo or {"stato": "irraggiungibile"}
     ultimo["ms"] = int((time.time() - t0) * 1000)
     return ultimo

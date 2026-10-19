@@ -10,7 +10,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: dati
+  group: dati-siti
   cancel-in-progress: false
 jobs:
   siti:
@@ -19,24 +19,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Zone da controllare
         id: zone
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            git diff --name-only HEAD~1 HEAD | grep -E '^zone/[^/]+/siti-richiesta\.json$' | xargs -r -n1 dirname | sort -u > zone.txt
+            prima="${{ github.event.before }}"
+            git cat-file -e "$prima" 2>/dev/null || prima=$(git rev-list --max-parents=0 HEAD | tail -1)
+            { git diff --name-only "$prima" HEAD || true; } | grep -E '^zone/[^/]+/siti-richiesta\.json$' | xargs -r -n1 dirname | sort -u > zone.txt
           else
             ls -d zone/*/ | sed 's#/$##' > zone.txt
           fi
           cat zone.txt
       - name: Controllo
-        run: |
-          while read -r z; do [ -f "$z/zona.json" ] && python3 motore/siti.py "$z"; done < zone.txt
+        run: bash motore/esegui_siti.sh
       - name: Salva nel repository
-        run: |
-          git config user.name "visibilita-bot"
-          git config user.email "visibilita-bot@users.noreply.github.com"
-          git add zone/*/siti.json 2>/dev/null || true
-          git diff --cached --quiet && exit 0
-          git commit -m "Controllo siti"
-          for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done
+        run: bash motore/salva.sh "Controllo siti" "bash motore/esegui_siti.sh"
