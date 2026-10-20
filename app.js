@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.3';
+const VERSIONE = '1.10.4';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
@@ -246,7 +246,8 @@ const registro = (zid, pid) => Object.values(ST.zone[zid].z.registro || {}).filt
 const ultimoContatto = (zid, pid) => (registro(zid, pid)[0] || {}).data || '';
 function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi, { u: nuovoU(p) }); modificato(zid); }
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
-function classeCard(p) { if (p.stato === 'Chiuso vinto') return 'vinto'; if (!aperto(p)) return 'chiuso'; const g = urgenza(p); if (g == null) return ''; return g < 0 ? 'scad' : g <= 2 ? 'vic' : ''; }
+// linea a sinistra = quanto è caldo il prospect, con i colori della legenda priorità (1 Caldo, 2 Tiepido, 0 Invisibile, 3 Rete)
+function classeCard(p) { const pr = 'pr' + ((p.priorita || '')[0] || 'x'); if (p.stato === 'Chiuso vinto') return pr + ' vinto'; if (!aperto(p)) return pr + ' chiuso'; return pr; }
 const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
 /* 🟢 caldo, 🟠 tiepido, 🔵 invisibile (categoria a sé), ⚪ rete (franchising, gestione separata) */
 const PALLINO = { 1: '🟢', 0: '🔵', 2: '🟠', 3: '⚪' };
