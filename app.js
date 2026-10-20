@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.11.0';
+const VERSIONE = '0.11.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -100,14 +100,23 @@ function toast(m, ms = 2600) { const t = $('#toast'); t.textContent = m; t.hidde
 /* ---------- archivio locale (IndexedDB, con ripiego in memoria) ---------- */
 const DB = (() => {
   let dbp; const mem = {};
-  const open = () => dbp || (dbp = new Promise((ok, ko) => { const r = indexedDB.open('visibilita', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); }));
-  const tx = async (modo, fn) => { const db = await open(); return new Promise((ok, ko) => { const t = db.transaction('kv', modo); const req = fn(t.objectStore('kv')); t.oncomplete = () => ok(req && req.result); t.onerror = () => ko(t.error); }); };
-  return {
-    get: async (k) => { try { return await tx('readonly', (s) => s.get(k)); } catch { return mem[k]; } },
-    set: async (k, v) => { try { await tx('readwrite', (s) => s.put(v, k)); } catch { mem[k] = v; } },
-    del: async (k) => { try { await tx('readwrite', (s) => s.delete(k)); } catch { delete mem[k]; } },
-    keys: async () => { try { return await tx('readonly', (s) => s.getAllKeys()); } catch { return Object.keys(mem); } },
+  // iOS a volte perde la connessione all'archivio quando l'app torna dallo sfondo: si riapre e si riprova una volta
+  const open = () => dbp || (dbp = new Promise((ok, ko) => {
+    const r = indexedDB.open('visibilita', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => { const db = r.result; db.onclose = () => { dbp = null; }; db.onversionchange = () => { db.close(); dbp = null; }; ok(db); };
+    r.onerror = () => { dbp = null; ko(r.error); }; r.onblocked = () => { dbp = null; ko(new Error('archivio bloccato')); };
+  }));
+  const tx1 = async (modo, fn) => { const db = await open(); return new Promise((ok, ko) => { const t = db.transaction('kv', modo); const req = fn(t.objectStore('kv')); t.oncomplete = () => ok(req && req.result); t.onerror = () => ko(t.error); t.onabort = () => ko(t.error); }); };
+  const tx = async (modo, fn) => { try { return await tx1(modo, fn); } catch (e) { dbp = null; await new Promise((r) => setTimeout(r, 300)); return tx1(modo, fn); } };
+  const guasto = (e) => { D0.guasto = String(e && (e.message || e.name) || e); };
+  const D0 = {
+    guasto: '',
+    get: async (k) => { try { return await tx('readonly', (s) => s.get(k)); } catch (e) { guasto(e); return mem[k]; } },
+    set: async (k, v) => { try { await tx('readwrite', (s) => s.put(v, k)); } catch (e) { guasto(e); mem[k] = v; } },
+    del: async (k) => { try { await tx('readwrite', (s) => s.delete(k)); } catch (e) { guasto(e); delete mem[k]; } },
+    keys: async () => { try { return await tx('readonly', (s) => s.getAllKeys()); } catch (e) { guasto(e); return Object.keys(mem); } },
   };
+  return D0;
 })();
 
 /* ---------- GitHub ---------- */
@@ -382,6 +391,10 @@ function vOggi() {
   ${ST.f.fatti ? `<div class="lista mt">${fatti.map((x) => cardProspect(x, esitoOggi(x))).join('')}</div>` : ''}` : ''}`;
 }
 function benvenuto() {
+  if (DB.guasto && !GH.ok()) return `<div class="box"><h2>Archivio del telefono non raggiungibile</h2>
+  <p>I dati non sono persi: sono su GitHub. iOS ha chiuso l'accesso all'archivio dell'app (${esc(DB.guasto)}).</p>
+  <p><b>Chiudi l'app dal multitasking</b> (scorri verso l'alto) e riaprila. Se il problema resta, ricollega GitHub da Profilo: i dati si riscaricano da soli.</p>
+  <a class="btn pri" href="#altro">Vai a Profilo</a></div>`;
   return `<div class="box"><h2>Benvenuto</h2><p>Nessun dato su questo dispositivo.</p>
   <p>${GH.ok() ? 'Il repository dati è collegato ma non contiene ancora zone: importa la prima da <b>Zone</b>.' : 'Collega il repository dati da <b>Profilo → Collegamento GitHub</b>, poi importa la prima zona.'}</p>
   <a class="btn pri" href="#${GH.ok() ? 'zone' : 'altro'}">${GH.ok() ? 'Vai a Zone' : 'Collega GitHub'}</a></div>`;
@@ -1180,7 +1193,7 @@ function legaVista(v) {
   if (v === 'altro') {
     $('#cSalva').onclick = async () => {
       ST.cfg = { owner: $('#cOwner').value.trim(), repo: $('#cRepo').value.trim(), token: $('#cTok').value.trim() };
-      await DB.set('cfg', ST.cfg); const out = $('#cEsito');
+      await DB.set('cfg', ST.cfg); try { localStorage.setItem('vl-cfg', JSON.stringify(ST.cfg)); } catch (e) { /* copia di riserva non disponibile */ } const out = $('#cEsito');
       try { const r = await fetch(`https://api.github.com/repos/${ST.cfg.owner}/${ST.cfg.repo}`, { cache: 'no-store', headers: { Authorization: `Bearer ${ST.cfg.token}` } });
         if (!r.ok) throw new Error(r.status === 404 ? 'Repository non trovato o token senza accesso' : r.status === 401 ? 'Token non valido' : 'GitHub ' + r.status);
         const j = await r.json(); out.innerHTML = `<span class="c-top">Collegato a ${esc(j.full_name)}</span>${j.private ? '' : ' <span class="c-neg">ATTENZIONE: il repository è pubblico. Rendilo privato.</span>'}`; scarica();
@@ -1197,7 +1210,7 @@ function legaVista(v) {
     $('#esci').onclick = async () => {
       if (Object.values(ST.zone).some((s) => s.dirty) && !confirm('Ci sono modifiche non ancora salvate su GitHub. Cancellare comunque?')) return;
       if (!confirm('Cancellare token e dati da questo dispositivo? Il repository GitHub non viene toccato.')) return;
-      for (const k of await DB.keys()) await DB.del(k); location.reload();
+      for (const k of await DB.keys()) await DB.del(k); try { localStorage.removeItem('vl-cfg'); } catch (e) { /* */ } location.reload();
     };
   }
 }
@@ -1205,6 +1218,10 @@ function legaVista(v) {
 /* ---------- avvio ---------- */
 (async function avvio() {
   ST.cfg = (await DB.get('cfg')) || {};
+  // copia di riserva del collegamento: se l'archivio del telefono non risponde, i dati si riscaricano da GitHub
+  let riserva = null; try { riserva = JSON.parse(localStorage.getItem('vl-cfg') || 'null'); } catch (e) { /* */ }
+  if (!ST.cfg.token && riserva && riserva.token) ST.cfg = riserva;
+  else if (ST.cfg.token) { try { localStorage.setItem('vl-cfg', JSON.stringify(ST.cfg)); } catch (e) { /* */ } }
   ST.conf = (await DB.get('conf')) || { firma: {} };
   for (const k of await DB.keys()) if (String(k).startsWith('zona:')) ST.zone[k.slice(5)] = await DB.get(k);
   statoSync(GH.ok() ? 'att' : 'loc', GH.ok() ? 'Avvio…' : 'Solo su questo dispositivo');
