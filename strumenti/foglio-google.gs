@@ -27,7 +27,7 @@ function costruisciTabelle(zone, oggi) {
       const rp = reg.filter((r) => r.p === p.id).sort((a, b) => (a.data < b.data ? 1 : -1));
       tutti.push({ z, p, a: (z.attivita || {})[p.pid] || {}, ultimo: rp.length ? rp[0].data : '', n: rp.length, contOggi: rp.find((r) => r.data === (p.giro || {}).data) });
     });
-    reg.forEach((r) => contatti.push([quartiere(z), r.data || '', (z.prospect[r.p] || {}).nome || r.p, r.canale || '', r.interlocutore || '', r.esito || '', r.emerso || '', r.prossima || '', r.entro || '']));
+    reg.forEach((r) => contatti.push([quartiere(z), r.data || '', (z.prospect[r.p] || {}).nome || r.p, (r.canale === 'Passaggio in agenzia' ? 'Passaggio' : r.canale || ''), r.interlocutore || '', r.esito || '', r.emerso || '', r.prossima || '', r.entro || '']));
   });
   // P.IVA trovata sui siti di domini diversi = sede di una rete (es. Tecnocasa): non la mostro
   const host = (u) => String(u || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();

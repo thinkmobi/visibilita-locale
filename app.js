@@ -1,17 +1,18 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.4';
+const VERSIONE = '1.10.5';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
-const CANALI = ['Telefono', 'Passaggio in agenzia', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
-const ESITI = ['Nessuna risposta', 'Segreteria', 'Richiamare', 'Report consegnato', 'Fare report completo', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
+const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
+const CANALI = ['Telefono', 'Passaggio', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
+const ESITI = ['Nessuna risposta', 'Chiuso', 'Segreteria', 'Richiamare', 'Ripassare', 'Report consegnato', 'Fare report completo', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
 const prossimoOrdine = (zid, data) => Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).reduce((m, q) => Math.max(m, q.giro.ordine || 0), 0) + 1;
 function rinumera(zid, data) {
   Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).sort((x, y) => (x.giro.ordine || 99) - (y.giro.ordine || 99))
     .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
 }
-const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Report consegnato': 'Contattato', 'Fare report completo': 'In attesa di risposta',
+const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Ripassare': 'Contattato', 'Report consegnato': 'Contattato', 'Fare report completo': 'In attesa di risposta',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
   'Non interessato': 'Chiuso perso', 'Firmato': 'Chiuso vinto' };
 /* lo stato avanza con l'esito, non torna indietro (es. "Nessuna risposta" su un prospect in trattativa) */
@@ -62,7 +63,7 @@ function pivaDaSiti() {
 }
 const esitiDi = (r) => r.esiti || (r.esito ? r.esito.split(' · ') : []);
 const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
-const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
+const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Chiuso': ['Ripassare', 1], 'Ripassare': ['Ripassare', 2], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Fare report completo': ['Preparare e consegnare il report completo', 2], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
@@ -471,7 +472,7 @@ function apriProspect(zid, id, opz = {}) {
     <a class="btn" ${sito ? `href="${/^https?:/.test(sito) ? esc(sito) : 'https://' + esc(sito)}" target="_blank" rel="noopener"` : 'aria-disabled="true"'}>${ico('web')}Sito</a>
   </div>
   <button class="btn pri" style="width:100%" id="registra">Registra contatto</button>
-  ${reg.length ? `<div class="box ultimo-box"><div class="riga"><span class="eb" style="margin:0">Ultimo contatto</span><span class="data">${gg(reg[0].data)} · ${esc(reg[0].canale)}</span></div>
+  ${reg.length ? `<div class="box ultimo-box"><div class="riga"><span class="eb" style="margin:0">Ultimo contatto</span><span class="data">${gg(reg[0].data)} · ${esc(canaleT(reg[0].canale))}</span></div>
     <div class="scelte" style="margin-top:6px">${esitiDi(reg[0]).map((e) => `<span class="chip on">${esc(e)}</span>`).join('')}</div>
     ${reg[0].interlocutore ? `<div class="sub">con ${esc(reg[0].interlocutore)}</div>` : ''}${reg[0].emerso ? `<div>${esc(reg[0].emerso)}</div>` : ''}
     ${reg.length > 1 ? `<a class="sub" href="#" id="vaiRegistro">Tutti i ${reg.length} contatti ↓</a>` : ''}</div>` : ''}
@@ -490,7 +491,7 @@ function apriProspect(zid, id, opz = {}) {
   <div class="mt">${minigriglia(z, p.pid)}</div>
   ${an ? `<div class="box classifica"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
   <div class="eb" id="registroP">Registro (${reg.length})</div>
-  ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(r.canale)}</span></div>
+  ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(canaleT(r.canale))}</span></div>
      ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
   ${an ? `<div class="eb">Report da stampare</div>
   <label class="f"><input type="checkbox" data-r="includi" ${p.report && p.report.includi === false ? '' : 'checked'} style="display:inline;width:auto;margin-right:6px">Includi nella stampa del giro</label>
@@ -586,7 +587,7 @@ function formContatto(zid, id, preset = {}) {
   const disegna = () => {
     const prec = registro(zid, id)[0];
     const f = apriFoglio('Contatto · ' + p.nome, `
-    ${prec ? `<div class="box ultimo-box" style="margin-top:0"><div class="riga"><span class="eb" style="margin:0">Contatto precedente</span><span class="data">${gg(prec.data)} · ${esc(prec.canale)}</span></div>
+    ${prec ? `<div class="box ultimo-box" style="margin-top:0"><div class="riga"><span class="eb" style="margin:0">Contatto precedente</span><span class="data">${gg(prec.data)} · ${esc(canaleT(prec.canale))}</span></div>
       <div class="scelte" style="margin-top:6px">${esitiDi(prec).map((e) => `<span class="chip on">${esc(e)}</span>`).join('')}</div>
       ${prec.interlocutore ? `<div class="sub">con ${esc(prec.interlocutore)}</div>` : ''}${prec.emerso ? `<div>${esc(prec.emerso)}</div>` : ''}
       <div class="sub">Stato ora: ${esc(p.stato)}${p.prossima ? ' · → ' + esc(p.prossima) : ''}</div></div>` : ''}
@@ -1119,7 +1120,7 @@ function esportaCSV(zid) {
   });
   const reg = [['Zona', 'Data', 'ID', 'Agenzia', 'Canale', 'Interlocutore', 'Esito', 'Cosa è emerso', 'Prossima azione', 'Entro il']];
   Object.entries(ST.zone).filter(([k]) => !zid || k === zid).forEach(([k, s]) => Object.values(s.z.registro || {}).filter((r) => !r.del).sort((a, b) => (a.data > b.data ? 1 : -1))
-    .forEach((r) => reg.push([s.z.meta.quartiere, r.data, r.p, (s.z.prospect[r.p] || {}).nome, r.canale, r.interlocutore, r.esito, r.emerso, r.prossima, r.entro])));
+    .forEach((r) => reg.push([s.z.meta.quartiere, r.data, r.p, (s.z.prospect[r.p] || {}).nome, canaleT(r.canale), r.interlocutore, r.esito, r.emerso, r.prossima, r.entro])));
   const csv = (rr) => '﻿' + rr.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
   // un solo file: prospect e, sotto, il registro dei contatti (se c'è)
   const tutto = reg.length > 1 ? [...righe, [], ['REGISTRO CONTATTI'], ...reg] : righe;
@@ -1165,7 +1166,7 @@ function legaVista(v) {
     V.querySelectorAll('[data-fgt]').forEach((b) => (b.onclick = () => { ST.fg[b.dataset.fgt] = !ST.fg[b.dataset.fgt]; render(); }));
     V.querySelectorAll('[data-su],[data-giu]').forEach((b) => (b.onclick = () => { const [zid, id] = (b.dataset.su || b.dataset.giu).split('|'); spostaTappa(zid, id, b.dataset.su ? -1 : 1); }));
     V.querySelectorAll('[data-ora]').forEach((el) => (el.onchange = () => { const [zid, id] = el.dataset.ora.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, orario: el.value } }); }));
-    V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio in agenzia', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
+    V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
     V.querySelectorAll('[data-annulla]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.annulla.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, fatto: false, fatto_il: '' } }); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-togli]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.togli.split('|'); const d = (ST.zone[zid].z.prospect[id].giro || {}).data; aggiorna(zid, id, { giro: {} }); rinumera(zid, d); modificato(zid); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-stampa]').forEach((b) => (b.onclick = () => generaPdf(b.dataset.stampa)));
