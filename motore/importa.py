@@ -134,6 +134,41 @@ def scarica(url, dest):
         f.write(r.read())
 
 
+MAX_SFONDO = 3
+
+
+def ritenta_sfondo(percorso):
+    """zona già importata ma senza sfondo (es. 404 temporaneo di Local Falcon): riprova a scaricare solo l'immagine.
+    Non tocca prospect, registro né punti: aggiunge meta.sfondo a zona.json e aggiorna l'esito."""
+    cartella = os.path.dirname(os.path.abspath(percorso))
+    fe, fz, fs = (os.path.join(cartella, n) for n in ("importa-esito.json", "zona.json", "sfondo.png"))
+    esito = json.load(open(fe, encoding="utf-8"))
+    if esito.get("stato") != "ok" or esito.get("sfondo") != "mancante": return
+    n = esito.get("tentativi_sfondo", 1)
+    if n >= MAX_SFONDO:
+        print(f"sfondo: sospeso dopo {n} tentativi"); return
+    try:
+        api_key = os.environ.get("LOCALFALCON_API_KEY")
+        if not api_key: raise RuntimeError("manca il secret LOCALFALCON_API_KEY nel repository dati")
+        d = chiedi_report(esito["report_key"], api_key)
+        if not d.get("image"): raise RuntimeError("Local Falcon non ha fornito l'immagine")
+        scarica(d["image"], fs)
+        z = json.load(open(fz, encoding="utf-8"))
+        z["meta"]["sfondo"] = "sfondo.png"
+        json.dump(z, open(fz, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
+        for k in ("sfondo", "tentativi_sfondo", "errore_sfondo"): esito.pop(k, None)
+        esito["avviso"] = "; ".join(a for a in (esito.get("avviso") or "").split("; ") if a and not a.startswith("sfondo non scaricato")) or None
+        if not esito["avviso"]: esito.pop("avviso")
+        print("sfondo scaricato al nuovo tentativo")
+    except InAttesa as e:
+        print(f"sfondo: report non ancora pronto ({e})")
+    except Exception as e:
+        if os.path.exists(fs) and "sfondo" not in json.load(open(fz, encoding="utf-8"))["meta"]: os.remove(fs)
+        esito["tentativi_sfondo"] = n + 1; esito["errore_sfondo"] = str(e)
+        print(f"sfondo: tentativo {n + 1} non riuscito ({e})")
+    json.dump(esito, open(fe, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
 def main(percorso):
     cartella = os.path.dirname(os.path.abspath(percorso))
     fe = os.path.join(cartella, "importa-esito.json")
@@ -177,6 +212,7 @@ def main(percorso):
         esito = {"report_key": esito["report_key"], "creata": esito["creata"], "stato": "ok",
                  "punti": len(z["punti"]), "attivita": len(z["attivita"])}
         if avvisi: esito["avviso"] = "; ".join(avvisi)
+        if "sfondo" not in z["meta"]: esito.update(sfondo="mancante", tentativi_sfondo=1)   # si riprova ai run successivi
     except InAttesa as e:   # non è un errore: l'app mostra l'attesa e il conto dei tentativi non sale
         esito.update(stato="in_attesa", messaggio=str(e), tentativi=esito.get("tentativi", 1) - 1)
     except Exception as e:
@@ -186,4 +222,5 @@ def main(percorso):
     print(json.dumps(esito, ensure_ascii=False, indent=1))
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if sys.argv[1] == "--sfondo": ritenta_sfondo(sys.argv[2])
+    else: main(sys.argv[1])

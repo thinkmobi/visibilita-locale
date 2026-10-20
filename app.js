@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '1.10.6';
+const VERSIONE = '0.11.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -1091,7 +1091,7 @@ function vAltro() {
   <div class="due"><label class="f">Telefono<input data-fi="telefono" value="${esc(fi.telefono || '+39 351 894 2667')}"></label><label class="f">Email<input data-fi="email" value="${esc(fi.email || 'hector.rinaldi@italiaonline.it')}"></label></div>
   <div class="eb">Dati</div>
   <div class="row"><button class="btn" id="bkp">Scarica backup completo</button><button class="btn" id="csvAll">Esporta CSV (Excel)</button><button class="btn" id="aggiorna">Riscarica da GitHub</button></div>
-  <p class="sub mt">Versione ${VERSIONE}. I dati restano nel repository privato e in questo dispositivo; il token è salvato solo qui. Su un telefono perso: revoca il token da GitHub → Settings → Developer settings.</p>
+  <p class="sub mt">Versione v${VERSIONE}. I dati restano nel repository privato e in questo dispositivo; il token è salvato solo qui. Su un telefono perso: revoca il token da GitHub → Settings → Developer settings.</p>
   <button class="btn mini" id="esci" style="color:var(--neg)">Scollega e cancella i dati da questo dispositivo</button>`;
 }
 async function preparaRepo(out) {
