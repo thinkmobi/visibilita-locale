@@ -186,6 +186,7 @@ select.ora{background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.o
 .mappa-giro{height:260px;border-radius:var(--r);border:1px solid var(--line);overflow:hidden;background:#E6E9E5;z-index:0}
 .mg-pin{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#fff;color:var(--ink);border:2px solid var(--ink);font:700 13px PlexCond,system-ui;box-shadow:0 1px 3px rgba(24,35,42,.3)}
 .mg-pin.vis{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mg-pin.ni{background:var(--neg-t);color:var(--r2);border-color:var(--r2)}
 .mg-pin.rc{background:var(--home);color:#fff;border-color:#1557B0}
 .mg-pin.rip{background:var(--y);color:var(--ink);border-color:#B88A00}
 .mg-pin.fatto{background:var(--top-t);color:var(--g1);border-color:var(--g1)}
@@ -231,3 +232,4 @@ body.largo .vista{padding-left:max(16px,env(safe-area-inset-left));padding-right
 .stato-tappa.visitata{background:#E6E9E7;color:var(--ink);border-color:#C9D0CC}
 .stato-tappa.rc{background:var(--home-t);color:#1557B0;border-color:#B9D2F5;margin-right:4px}
 .badge-rc{display:inline-flex;align-items:center;font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;background:var(--home-t);color:#1557B0;border:1px solid #B9D2F5}
+.stato-tappa.ni{background:var(--neg-t);color:var(--r2);border-color:#F2C2BF;margin-right:4px}
