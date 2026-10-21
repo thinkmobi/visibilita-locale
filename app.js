@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.11.3';
+const VERSIONE = '0.12.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -347,6 +347,8 @@ const ultimoReg = (z, pid) => Object.values(z.registro || {}).filter((r) => !r.d
 const reportCompleto = (z, p) => { if (!aperto(p)) return false; const ur = ultimoReg(z, p.id); return /report completo/i.test(p.prossima || '') || !!(ur && esitiDi(ur).includes('Fare report completo')); };
 // non interessato: stato Chiuso perso o ultimo esito "Non interessato"
 const nonInteressato = (z, p) => { if (p.stato === 'Chiuso perso') return true; const ur = ultimoReg(z, p.id); return !!(ur && esitiDi(ur).includes('Non interessato')); };
+// da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
+const ripassare = (z, p) => { if ((p.giro && p.giro.fatto) || !aperto(p)) return false; const r = ultimoReg(z, p.id); return (r && esitiDi(r).some((e) => e === 'Chiuso' || e === 'Ripassare')) || /^ripassare/i.test(p.prossima || ''); };
 const badgeRC = (z, p) => (reportCompleto(z, p) ? '<span class="badge-rc">Report completo da preparare</span>' : '');
 const esitoBreve = (r) => esitiDi(r).map((e) => esc(e)).join(' · ');
 function testoProspect(z, p, extra = '') {
@@ -383,7 +385,7 @@ function vOggi() {
     .sort((a, b) => prioRank(a.p) - prioRank(b.p));
   const fatti = tt.filter(sentitoOggi);
   const ultimoOggi = (x) => registro(x.zid, x.p.id).find((r) => r.data === d);
-  const tappa = (x) => `<div class="riga" style="margin-top:4px"><span class="sub">${esc(x.p.giro.orario || '')}${x.p.giro.orario ? ' · ' : ''}tappa ${numTappa[x.zid + '|' + x.p.id] || ''}</span><span class="stato-tappa">Da visitare</span></div>`;
+  const tappa = (x) => `<div class="riga" style="margin-top:4px"><span class="sub">${esc(x.p.giro.orario || '')}${x.p.giro.orario ? ' · ' : ''}tappa ${numTappa[x.zid + '|' + x.p.id] || ''}</span>${ripassare(x.z, x.p) ? '<span class="stato-tappa ripassare">↻ Da ripassare</span>' : '<span class="stato-tappa">Da visitare</span>'}</div>`;
   const esitoOggi = (x) => { const r = ultimoOggi(x); return `<div class="riga" style="margin-top:4px">${x.p.giro && x.p.giro.data === d && x.p.giro.fatto ? '<span class="stato-tappa consegnata">✓ Consegnato</span>' : ''}${r ? `<span class="sub">Oggi: ${esc(r.esito)}</span>` : ''}</div>`; };
   const vuoto = !giroDaFare.length && !richiami.length;
   return `${kpi}
@@ -694,7 +696,7 @@ function vGiro() {
   const fg = ST.fg;
   const contattata = (x) => registro(x.zid, x.p.id).some((r) => r.data === d);
   // da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
-  const daRipassare = (x) => { if (x.p.giro.fatto || !aperto(x.p)) return false; const r = ultimoReg(x.z, x.p.id); return (r && esitiDi(r).some((e) => e === 'Chiuso' || e === 'Ripassare')) || /^ripassare/i.test(x.p.prossima || ''); };
+  const daRipassare = (x) => ripassare(x.z, x.p);
   const passa = (x) => (!fg.tappa || (fg.tappa === 'da' ? !x.p.giro.fatto && !contattata(x) : fg.tappa === 'ripassare' ? daRipassare(x) : fg.tappa === 'rc' ? reportCompleto(x.z, x.p) : fg.tappa === 'ni' ? nonInteressato(x.z, x.p) : fg.tappa === 'fatte' ? x.p.giro.fatto : fg.tappa === 'contattate' ? contattata(x) && !x.p.giro.fatto : true))
     && (!fg.prio || x.p.priorita === fg.prio) && (!fg.nr || nonRiv(x.z, x.p)) && (!fg.pg || x.p.pg === 'assente');
   const tappe = tutte.filter(passa);
@@ -1221,6 +1223,16 @@ function legaVista(v) {
     };
   }
 }
+
+/* ---------- altezza reale della finestra (iOS app da Home) ---------- */
+// se il corpo pagina non coincide con l'altezza visibile (fascia bianca sotto la barra schede), lo si allinea
+function adattaAltezza() {
+  const h = window.innerHeight, b = document.body; if (!b || !h) return;
+  if (Math.abs(b.getBoundingClientRect().height - h) > 2) b.style.height = h + 'px'; else if (b.style.height && Math.abs(parseFloat(b.style.height) - h) > 2) b.style.height = '';
+}
+['resize', 'pageshow', 'orientationchange'].forEach((ev) => window.addEventListener(ev, () => { adattaAltezza(); setTimeout(adattaAltezza, 350); }));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(adattaAltezza, 200); });
+[0, 300, 1000].forEach((t) => setTimeout(adattaAltezza, t));
 
 /* ---------- avvio ---------- */
 (async function avvio() {

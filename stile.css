@@ -24,7 +24,9 @@ h2{font-size:20px}h3{font-size:16px}
    Così su iPhone (Safari e Chrome) testata e barra restano sempre al loro posto, la barra degli indirizzi
    non si ritrae e la barra di stato prende il colore piatto della testata (sfondo del body) */
 html,body{background:linear-gradient(var(--ink) 0 50%,#fff 50% 100%);height:100%;overflow:hidden}   /* sopra: colore della testata, sotto: colore della barra schede */
-body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+/* iOS in modalità app a volte calcola male 100dvh all'avvio (barra sollevata finché non si ruota il telefono):
+   il body fisso ai quattro lati prende sempre l'altezza reale della finestra */
+body{display:flex;flex-direction:column;position:fixed;top:0;right:0;bottom:0;left:0;height:auto;width:auto}
 .top{position:relative;flex:none;z-index:5;height:var(--top-h);display:flex;align-items:center;justify-content:space-between;
   padding:env(safe-area-inset-top,0px) 16px 0;background:var(--ink);color:#fff}
 .brand{display:flex;align-items:center;gap:10px;font-family:PlexCond;font-size:19px;font-weight:700;font-display:swap}
