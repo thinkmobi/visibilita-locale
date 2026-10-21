@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.12.0';
+const VERSIONE = '0.12.1';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -10,7 +10,7 @@ const ESITI = ['Nessuna risposta', 'Chiuso', 'Segreteria', 'Richiamare', 'Ripass
 const prossimoOrdine = (zid, data) => Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).reduce((m, q) => Math.max(m, q.giro.ordine || 0), 0) + 1;
 function rinumera(zid, data) {
   Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === data).sort((x, y) => (x.giro.ordine || 99) - (y.giro.ordine || 99))
-    .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
+    .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; tocca(q, 'giro'); } });
 }
 const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Ripassare': 'Contattato', 'Report consegnato': 'Contattato', 'Fare report completo': 'In attesa di risposta',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
@@ -62,7 +62,7 @@ function pivaDaSiti() {
   }
 }
 const esitiDi = (r) => r.esiti || (r.esito ? r.esito.split(' · ') : []);
-const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
+const statoDaEsito = (attuale, esito) => { const n = ESITO_STATO[esito]; if (!n) return attuale; if (/^Chiuso/.test(n)) return n; if (CHIUSI.includes(attuale)) return n; return STATI.indexOf(n) > STATI.indexOf(attuale) ? n : attuale; };
 const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Chiuso': ['Ripassare', 1], 'Ripassare': ['Ripassare', 2], 'Segreteria': ['Richiamare', 1], 'Richiamare': ['Richiamare', 2],
   'Report consegnato': ["Telefonare per fissare l'incontro", 3], 'Fare report completo': ['Preparare e consegnare il report completo', 2], 'Interessato': ["Fissare l'incontro", 2], 'Appuntamento fissato': ["Incontro: presentare l'analisi completa", 0],
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
@@ -162,6 +162,20 @@ const piuRecente = (a, b) => ((a && a.u || 0) >= (b && b.u || 0) ? a : b);
 const recordUnito = (a, b) => { const w = piuRecente(a, b); return (a && a.del) || (b && b.del) ? { ...w, del: true } : w; };
 /* il timestamp di una modifica supera sempre quello già noto del record: un orologio indietro non fa perdere modifiche */
 const nuovoU = (rec) => Math.max(ora(), ((rec && rec.u) || 0) + 1);
+/* ogni campo modificato di un prospect porta la sua ora (uf): due dispositivi che cambiano campi diversi non si cancellano a vicenda */
+function tocca(p, ...campi) { const u = nuovoU(p); p.uf = { ...(p.uf || {}) }; for (const k of campi) p.uf[k] = u; p.u = u; }
+function prospectUnito(a, b) {
+  if (!a || !b) return recordUnito(a, b);
+  const w = piuRecente(a, b), o = w === a ? b : a;
+  const ufw = w.uf || {}, ufo = o.uf || {};
+  const r = { ...w, uf: { ...ufw } };
+  for (const k of Object.keys(ufo)) {
+    if ((ufo[k] || 0) > (ufw[k] || 0)) { if (k in o) r[k] = o[k]; else delete r[k]; r.uf[k] = ufo[k]; }
+  }
+  r.u = Math.max(a.u || 0, b.u || 0);
+  if (a.del || b.del) r.del = true;
+  return r;
+}
 function unisci(loc, rem) {
   // record per record vince la modifica più recente; nessuna cancellazione fisica (campo del)
   const z = JSON.parse(JSON.stringify(rem));
@@ -175,7 +189,7 @@ function unisci(loc, rem) {
   z.meta.u = Math.max(lm.u || 0, rm.u || 0);
   for (const k of ['prospect', 'registro']) {
     z[k] = { ...(rem[k] || {}) };
-    for (const [id, v] of Object.entries(loc[k] || {})) z[k][id] = recordUnito(v, z[k][id]);
+    for (const [id, v] of Object.entries(loc[k] || {})) z[k][id] = k === 'prospect' ? prospectUnito(v, z[k][id]) : recordUnito(v, z[k][id]);
   }
   z.attivita = { ...(rem.attivita || {}) };
   for (const [pid, a] of Object.entries(loc.attivita || {})) if (!z.attivita[pid] || (a.u || 0) > (z.attivita[pid].u || 0)) z.attivita[pid] = a;
@@ -217,6 +231,7 @@ async function invia(id, tentativi = 3) {
 }
 async function scarica() {
   if (!GH.ok() || !navigator.onLine) { statoSync(GH.ok() ? 'att' : 'loc', GH.ok() ? 'Offline' : 'Solo su questo dispositivo'); return; }
+  if (ST.scaricando) return; ST.scaricando = true;   // un solo aggiornamento alla volta
   try {
     statoSync('att', 'Aggiorno…');
     const conf = await GH.getJSON('config.json'); if (conf) { ST.conf = conf.data; ST.confSha = conf.sha; DB.set('conf', ST.conf); }
@@ -231,11 +246,14 @@ async function scarica() {
         const r = await GH.getJSON(`zone/${id}/siti.json`).catch(() => null);
         if (r) { ST.zone[id].siti = r.data; ST.zone[id].sitiSha = fs.sha; await salvaLocale(id); }
       }
+      if (!ST.zone[id]) { const s0 = await DB.get('zona:' + id); if (s0 && s0.z) ST.zone[id] = s0; }   // modifiche offline mai perse se l'archivio era lento all'avvio
       const loc = ST.zone[id];
       if (loc && loc.sha === file.sha && !loc.dirty) continue;
       if (loc && loc.inviando) continue;   // un invio è in corso: la zona si aggiorna al giro successivo
       const r = await GH.getJSON(`zone/${id}/zona.json`);
-      if (loc && loc.dirty) { ST.zone[id] = { ...loc, z: unisci(loc.z, r.data), sha: r.sha, dirty: true }; }
+      const ora0 = ST.zone[id];
+      if (ora0 !== loc || (ora0 && ora0.inviando)) continue;   // durante l'attesa è partito un invio o la zona è cambiata: si riprende al giro successivo
+      if (loc && loc.dirty) { loc.z = unisci(loc.z, r.data); loc.sha = r.sha; }   // stesso oggetto: nessuna copia di stati temporanei
       else ST.zone[id] = { z: r.data, sha: r.sha, dirty: false, siti: loc && loc.siti, sitiSha: loc && loc.sitiSha };
       if (!ST.zone[id].siti && fs) { const rs = await GH.getJSON(`zone/${id}/siti.json`).catch(() => null); if (rs) { ST.zone[id].siti = rs.data; ST.zone[id].sitiSha = fs.sha; } }
       await salvaLocale(id);
@@ -248,13 +266,16 @@ async function scarica() {
     const att = document.activeElement;
     if (!$('#foglio').hidden || (att && /^(INPUT|TEXTAREA|SELECT)$/.test(att.tagName) && $('#vista').contains(att))) ST.daRender = true; else render();
   } catch (e) { console.error(e); statoSync('err', e.status === 401 ? 'Token non valido' : 'Non raggiungibile'); }
+  finally { ST.scaricando = false; }
 }
 
 /* ---------- accesso ai dati ---------- */
 const tutti = () => Object.entries(ST.zone).flatMap(([zid, s]) => Object.values(s.z.prospect || {}).filter((p) => !p.del).map((p) => ({ zid, z: s.z, p })));
 const registro = (zid, pid) => Object.values(ST.zone[zid].z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1));
+// contatti di prospect ancora presenti (quelli di prospect eliminati non entrano nei conteggi)
+const registroVivo = () => Object.values(ST.zone).flatMap((s) => Object.values(s.z.registro || {}).filter((r) => !r.del && s.z.prospect[r.p] && !s.z.prospect[r.p].del));
 const ultimoContatto = (zid, pid) => (registro(zid, pid)[0] || {}).data || '';
-function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi, { u: nuovoU(p) }); modificato(zid); }
+function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi); tocca(p, ...Object.keys(campi)); modificato(zid); }
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
 // linea a sinistra = quanto è caldo il prospect, con i colori della legenda priorità (1 Caldo, 2 Tiepido, 0 Invisibile, 3 Rete)
 function classeCard(p) { const pr = 'pr' + ((p.priorita || '')[0] || 'x'); if (p.stato === 'Chiuso vinto') return pr + ' vinto'; if (!aperto(p)) return pr + ' chiuso'; return pr; }
@@ -538,7 +559,8 @@ function apriProspect(zid, id, opz = {}) {
   const segna = () => { sporco = true; statoBarra(f, 'sporco'); };
   const salva = () => {
     if (!sporco) return;
-    const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(p.report || {}), ...DR };
+    const pf = ST.zone[zid].z.prospect[id];   // versione aggiornata: una sincronizzazione può averla sostituita mentre la scheda era aperta
+    const campi = { ...D }; if (Object.keys(DR).length) campi.report = { ...(pf.report || {}), ...DR };
     if ('nome' in campi) campi.nome = maiuscole(campi.nome);
     if ('referente' in campi) campi.referente = maiuscole(campi.referente, true);
     if ('piva' in campi) {
@@ -593,18 +615,20 @@ function apriProspect(zid, id, opz = {}) {
 
 /* ---------- registra contatto: un solo modulo aggiorna registro, stato e prossima azione ---------- */
 function formContatto(zid, id, preset = {}) {
-  const p = ST.zone[zid].z.prospect[id];
+  let p = ST.zone[zid].z.prospect[id];
+  const fresco = () => (p = ST.zone[zid].z.prospect[id] || p);   // dopo una sincronizzazione il record in memoria è un altro oggetto
   // esiti a scelta multipla: stato e prossima azione seguono il più avanzato (l'ultimo nell'elenco ESITI)
   const v = { canale: preset.canale || 'Telefono', esiti: preset.esito ? [preset.esito] : [], interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
-  const peso = (e) => { const st = ESITO_STATO[e]; return (st && /^Chiuso/.test(st) ? 100 : STATI.indexOf(st)) * 100 + ESITI.indexOf(e); };
+  const peso = (e) => { const st = ESITO_STATO[e] || (e === 'Chiuso' ? 'Contattato' : undefined); return (st && /^Chiuso/.test(st) ? 100 : STATI.indexOf(st)) * 100 + ESITI.indexOf(e); };
   const principale = () => v.esiti.slice().sort((a, b) => peso(a) - peso(b)).pop() || '';
   const proponi = () => {
-    const e = principale(); v.stato = statoDaEsito(p.stato, e);
+    fresco(); const e = principale(); v.stato = statoDaEsito(p.stato, e);
     const az = ESITO_AZIONE[e]; if (az) { v.prossima = az[0]; v.entro = piuGiorni(az[1], v.data); } else { v.prossima = ''; v.entro = ''; }
   };
   proponi();
   const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${(k === 'esito' ? v.esiti.includes(o) : v[k] === o) ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   const disegna = () => {
+    fresco();
     const prec = registro(zid, id)[0];
     const f = apriFoglio('Contatto · ' + p.nome, `
     ${prec ? `<div class="box ultimo-box" style="margin-top:0"><div class="riga"><span class="eb" style="margin:0">Contatto precedente</span><span class="data">${gg(prec.data)} · ${esc(canaleT(prec.canale))}</span></div>
@@ -642,7 +666,8 @@ function formContatto(zid, id, preset = {}) {
       disegna();
     }));
     $('#salva').onclick = () => {
-      leggi(); if (!v.esiti.length) { toast('Scegli almeno un esito'); return; }
+      leggi(); fresco(); if (!v.esiti.length) { toast('Scegli almeno un esito'); return; }
+      if (!v.data) v.data = oggi();   // su iPhone il campo data si può svuotare con "Reset"
       const esiti = v.esiti.slice().sort((a, b) => ESITI.indexOf(a) - ESITI.indexOf(b));
       const z = ST.zone[zid].z; const rid = uid();
       z.registro = z.registro || {};
@@ -778,12 +803,12 @@ function formSpostaGiro() {
         if (p.data_prossima === da) p.data_prossima = a;
         if (p.visita_entro) p.visita_entro = piuGiorni(delta, p.visita_entro);
       }
-      p.u = nuovoU(p); zone.add(zid);
+      tocca(p, 'giro', 'data_prossima', 'visita_entro'); zone.add(zid);
     }
     // rinumera le tappe rimaste nella data di partenza
     for (const zid of zone) {
       Object.values(ST.zone[zid].z.prospect).filter((q) => !q.del && q.giro && q.giro.data === da).sort((x, y) => x.giro.ordine - y.giro.ordine)
-        .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; q.u = nuovoU(q); } });
+        .forEach((q, i) => { if (q.giro.ordine !== i + 1) { q.giro = { ...q.giro, ordine: i + 1 }; tocca(q, 'giro'); } });
       modificato(zid);
     }
     ST.giroData = a; toast(`✓ ${scelte.length} tappe spostate al ${gg(a)} alle ${oraAdesso()}`); chiudiFoglio(); render();
@@ -794,7 +819,7 @@ function spostaTappa(zid, id, dir) {
   const arr = tutti().filter((x) => x.zid === zid && x.p.giro && x.p.giro.data === d).sort((a, b) => (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
   const i = arr.findIndex((x) => x.p.id === id), j = i + dir; if (j < 0 || j >= arr.length) return;
   [arr[i], arr[j]] = [arr[j], arr[i]];
-  arr.forEach((x, k) => { if (x.p.giro.ordine !== k + 1) { x.p.giro = { ...x.p.giro, ordine: k + 1 }; x.p.u = nuovoU(x.p); } });
+  arr.forEach((x, k) => { if (x.p.giro.ordine !== k + 1) { x.p.giro = { ...x.p.giro, ordine: k + 1 }; tocca(x.p, 'giro'); } });
   modificato(zid); ST.restaScroll = true; render();
 }
 function scegliTappa() {
@@ -843,7 +868,7 @@ async function generaPdf(zid) {
         if (e.data.errore) { out.innerHTML = `<span class="c-neg">${esc(e.data.errore)}</span>`; return; }
         const av = (e.data.avvisi || []).map((a) => `<div class="avviso">${esc(a)}</div>`).join('');
         out.innerHTML = `<button class="btn mini ink" data-pdf="${zid}|${esc(e.data.file)}">Apri ${esc(e.data.file.split('/').pop())}</button>${av}`;
-        const za = ST.zone[zid].z; ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); p.u = nuovoU(p); } }); modificato(zid);
+        const za = ST.zone[zid].z; ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); tocca(p, 'report_prodotto'); } }); modificato(zid);
         return;
       }
     }
@@ -1000,7 +1025,7 @@ async function importaFile(files) {
 
 /* ---------- vista: numeri ---------- */
 function vCruscotto() {
-  const tt = tutti(); const regs = Object.values(ST.zone).flatMap((s) => Object.values(s.z.registro || {}).filter((r) => !r.del));
+  const tt = tutti(); const regs = registroVivo();
   const vinti = tt.filter((x) => x.p.stato === 'Chiuso vinto'), persi = tt.filter((x) => x.p.stato === 'Chiuso perso');
   const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const max = Math.max(1, ...STATI.map((s) => tt.filter((x) => x.p.stato === s).length));
@@ -1063,7 +1088,7 @@ function vTabella() {
   if (!tutti().length) return benvenuto();
   const tt = righeTabella(); const f = ST.ft; const zoneIds = Object.keys(ST.zone);
   const tutti0 = tutti(); const ap = tutti0.filter((x) => aperto(x.p));
-  const regs = Object.values(ST.zone).flatMap((s) => Object.values(s.z.registro || {}).filter((r) => !r.del));
+  const regs = registroVivo();
   const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const kp = (lab, n, solo, c = '') => `<button data-ts="${solo}" class="${f.solo === solo && solo ? 'sel' : ''}"><b class="${c}">${n}</b><span>${lab}</span></button>`;
   const opz = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
@@ -1225,13 +1250,37 @@ function legaVista(v) {
 }
 
 /* ---------- altezza reale della finestra (iOS app da Home) ---------- */
-// se il corpo pagina non coincide con l'altezza visibile (fascia bianca sotto la barra schede), lo si allinea
-function adattaAltezza() {
-  const h = window.innerHeight, b = document.body; if (!b || !h) return;
-  if (Math.abs(b.getBoundingClientRect().height - h) > 2) b.style.height = h + 'px'; else if (b.style.height && Math.abs(parseFloat(b.style.height) - h) > 2) b.style.height = '';
+// Su iPhone, nell'app aperta dalla Home, WebKit a volte calcola la finestra ~60 px più bassa del vero
+// (all'avvio o dopo la tastiera): innerHeight, 100dvh e position:fixed restano "corti" finché non si ruota il telefono.
+// Rimedio: 1) altezza del corpo pagina presa dallo schermo, che in modalità app occupa tutto; 2) un "ricalcolo" forzato
+// (nascondi e rimostra il corpo) quando l'app torna in primo piano o si chiude la tastiera.
+const IPHONE_APP = /iPhone/.test(navigator.userAgent) && navigator.standalone === true;
+function altezzaGiusta() {
+  const h = window.innerHeight;
+  if (!IPHONE_APP) return h;
+  const orizz = window.innerWidth > h;
+  const schermo = orizz ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+  const att = document.activeElement;
+  const tastiera = att && /^(INPUT|TEXTAREA|SELECT)$/.test(att.tagName);
+  // solo uno scarto "da bug" (fino a ~140 px) e senza tastiera aperta; oltre è la tastiera o altro, si lascia fare a iOS
+  return !tastiera && schermo > h && schermo - h <= 140 ? schermo : h;
 }
-['resize', 'pageshow', 'orientationchange'].forEach((ev) => window.addEventListener(ev, () => { adattaAltezza(); setTimeout(adattaAltezza, 350); }));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(adattaAltezza, 200); });
+function adattaAltezza() {
+  const b = document.body; if (!b) return;
+  const giusta = altezzaGiusta();
+  if (Math.abs(b.getBoundingClientRect().height - giusta) > 2) b.style.height = giusta + 'px';
+}
+function ricalcolaFinestra() {
+  if (!IPHONE_APP) { adattaAltezza(); return; }
+  const v = $('#vista'); const pos = v ? v.scrollTop : 0;
+  document.body.style.display = 'none'; void document.body.offsetHeight; document.body.style.display = '';
+  if (v) v.scrollTop = pos;
+  adattaAltezza();
+}
+['resize', 'orientationchange'].forEach((ev) => window.addEventListener(ev, () => { adattaAltezza(); setTimeout(adattaAltezza, 350); }));
+window.addEventListener('pageshow', () => setTimeout(ricalcolaFinestra, 50));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(ricalcolaFinestra, 200); });
+document.addEventListener('focusout', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) ricalcolaFinestra(); }, 160); });
 [0, 300, 1000].forEach((t) => setTimeout(adattaAltezza, t));
 
 /* ---------- avvio ---------- */
@@ -1249,6 +1298,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) setT
   window.addEventListener('online', () => { Object.keys(ST.zone).forEach((id) => invia(id)); scarica(); });
   window.addEventListener('offline', () => statoSync('att', 'Offline'));
   document.addEventListener('visibilitychange', () => { if (!document.hidden && ora() - (ST.ultimo || 0) > 60000) scarica(); });
+  // con l'app aperta (anche la Tabella sul computer) i dati si riallineano ogni minuto
+  setInterval(() => { if (!document.hidden && ora() - (ST.ultimo || 0) > 55000) scarica(); }, 60000);
   document.addEventListener('click', (e) => { const sb = e.target.closest('.badge-sito[data-href]'); if (sb) { e.preventDefault(); e.stopPropagation(); window.open(sb.dataset.href, '_blank', 'noopener'); } }, true);
   document.addEventListener('click', (e) => { const b = e.target.closest('[data-pdf]'); if (b) { const [zid, f] = b.dataset.pdf.split('|'); apriPdf(zid, f); } });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
