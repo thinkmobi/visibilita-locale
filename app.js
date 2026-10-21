@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.12.1';
+const VERSIONE = '0.12.2';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -533,7 +533,8 @@ function apriProspect(zid, id, opz = {}) {
   ${an ? `<div class="box classifica"><b>${esc(an.list_title)}</b><table class="cl">${an.list.map(([r, n, rv, me]) => `<tr class="${me ? 'me' : ''}"><td>${r || '20+'}</td><td>${esc(n)}</td><td style="text-align:right" class="mono">${esc(rv)}</td></tr>`).join('')}</table></div>` : ''}` : '<div class="avviso mt">Attività non presente nella scansione della zona: niente metriche né report.</div>'}
   <div class="eb" id="registroP">Registro (${reg.length})</div>
   ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(canaleT(r.canale))}</span></div>
-     ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}</div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
+     ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}
+     <div class="reg-az"><button class="btn mini" data-rmod="${esc(r.id)}">Modifica</button><button class="btn mini neg-t" data-rdel="${esc(r.id)}">Elimina</button></div></div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
   ${an ? `<div class="eb">Report da stampare</div>
   <label class="f"><input type="checkbox" data-r="includi" ${p.report && p.report.includi === false ? '' : 'checked'} style="display:inline;width:auto;margin-right:6px">Includi nella stampa del giro</label>
   <label class="f">Titolo<textarea data-r="titolo">${esc(an.title)}</textarea></label>
@@ -603,6 +604,14 @@ function apriProspect(zid, id, opz = {}) {
   if (opz.salvato) statoBarra(f, 'salvato', opz.salvato);
   $('#annulla', f).onclick = annulla;
   if ($('#vaiRegistro', f)) $('#vaiRegistro', f).onclick = (e) => { e.preventDefault(); $('#registroP', f).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  // registro: correggere o eliminare un contatto invece di registrarlo di nuovo
+  f.querySelectorAll('[data-rmod]').forEach((b) => (b.onclick = () => { if (salva() !== false) formContatto(zid, id, { modifica: b.dataset.rmod }); }));
+  f.querySelectorAll('[data-rdel]').forEach((b) => (b.onclick = () => {
+    const za = ST.zone[zid].z, r = za.registro[b.dataset.rdel]; if (!r) return;
+    if (!confirm(`Eliminare il contatto del ${gg(r.data)} (${esitiDi(r).join(', ')})? Stato e prossima azione della scheda non cambiano.`)) return;
+    za.registro[r.id] = { ...r, del: true, u: nuovoU(r) }; modificato(zid);
+    if (salva() !== false) apriProspect(zid, id, { salvato: 'Contatto eliminato' });
+  }));
   $('#registra', f).onclick = () => { if (salva() !== false) formContatto(zid, id); };
   $('#elimina', f).onclick = () => {
     const g = p.giro && p.giro.data ? p.giro.data : '';
@@ -618,19 +627,25 @@ function formContatto(zid, id, preset = {}) {
   let p = ST.zone[zid].z.prospect[id];
   const fresco = () => (p = ST.zone[zid].z.prospect[id] || p);   // dopo una sincronizzazione il record in memoria è un altro oggetto
   // esiti a scelta multipla: stato e prossima azione seguono il più avanzato (l'ultimo nell'elenco ESITI)
-  const v = { canale: preset.canale || 'Telefono', esiti: preset.esito ? [preset.esito] : [], interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
+  const rm = preset.modifica ? (ST.zone[zid].z.registro || {})[preset.modifica] : null;   // contatto da correggere
+  const v = rm ? { canale: canaleT(rm.canale) || 'Telefono', esiti: esitiDi(rm).slice(), interlocutore: rm.interlocutore || '', emerso: rm.emerso || '', prossima: rm.prossima || '', entro: rm.entro || '', stato: p.stato, data: rm.data || oggi() }
+    : { canale: preset.canale || 'Telefono', esiti: preset.esito ? [preset.esito] : [], interlocutore: p.referente || '', emerso: '', prossima: '', entro: '', stato: p.stato, data: oggi() };
+  // la scheda (stato, prossima azione) segue la modifica solo se il contatto corretto è il più recente
+  let toccato = false;
+  const ePiuRecente = () => !rm || (registro(zid, id)[0] || {}).id === rm.id;
   const peso = (e) => { const st = ESITO_STATO[e] || (e === 'Chiuso' ? 'Contattato' : undefined); return (st && /^Chiuso/.test(st) ? 100 : STATI.indexOf(st)) * 100 + ESITI.indexOf(e); };
   const principale = () => v.esiti.slice().sort((a, b) => peso(a) - peso(b)).pop() || '';
   const proponi = () => {
     fresco(); const e = principale(); v.stato = statoDaEsito(p.stato, e);
     const az = ESITO_AZIONE[e]; if (az) { v.prossima = az[0]; v.entro = piuGiorni(az[1], v.data); } else { v.prossima = ''; v.entro = ''; }
   };
-  proponi();
+  if (!rm) proponi();
   const ch = (k, arr) => `<div class="scelte">${arr.map((o) => `<button class="chip ${(k === 'esito' ? v.esiti.includes(o) : v[k] === o) ? 'on' : ''}" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   const disegna = () => {
     fresco();
-    const prec = registro(zid, id)[0];
-    const f = apriFoglio('Contatto · ' + p.nome, `
+    const prec = rm ? null : registro(zid, id)[0];
+    const f = apriFoglio((rm ? 'Modifica contatto · ' : 'Contatto · ') + p.nome, `
+    ${rm ? `<div class="box ultimo-box" style="margin-top:0"><b>Stai correggendo il contatto del ${gg(rm.data)}</b><div class="sub">${ePiuRecente() ? 'È il più recente: stato e prossima azione della scheda seguono la correzione.' : 'Non è il più recente: cambia solo questa voce del registro, la scheda resta com\'è.'}</div></div>` : ''}
     ${prec ? `<div class="box ultimo-box" style="margin-top:0"><div class="riga"><span class="eb" style="margin:0">Contatto precedente</span><span class="data">${gg(prec.data)} · ${esc(canaleT(prec.canale))}</span></div>
       <div class="scelte" style="margin-top:6px">${esitiDi(prec).map((e) => `<span class="chip on">${esc(e)}</span>`).join('')}</div>
       ${prec.interlocutore ? `<div class="sub">con ${esc(prec.interlocutore)}</div>` : ''}${prec.emerso ? `<div>${esc(prec.emerso)}</div>` : ''}
@@ -639,26 +654,27 @@ function formContatto(zid, id, preset = {}) {
     <label class="f">Esito <span class="sub">(anche più di uno)</span></label>${ch('esito', ESITI)}
     <div class="due"><label class="f">Data<input id="cData" type="date" value="${v.data}"></label><label class="f">Interlocutore<input id="cInt" value="${esc(v.interlocutore)}"></label></div>
     <label class="f">Cosa è emerso<textarea id="cEm">${esc(v.emerso)}</textarea></label>
-    <div class="box"><div class="eb" style="margin-top:0">Dopo questo contatto</div>
+    <div class="box"><div class="eb" style="margin-top:0">${rm && !ePiuRecente() ? 'Prossima azione annotata in questo contatto' : 'Dopo questo contatto'}</div>
     <label class="f">Prossima azione<input id="cPr" value="${esc(v.prossima)}"></label>
     <div class="due"><label class="f">Entro il<input id="cEn" type="date" value="${v.entro}"></label>
-    <label class="f">Nuovo stato<select id="cSt">${STATI.map((s) => `<option value="${esc(s)}" ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div><div class="sub" id="cStNota"></div></div>
+    <label class="f" ${rm && !ePiuRecente() ? 'style="display:none"' : ''}>Nuovo stato<select id="cSt">${STATI.map((s) => `<option value="${esc(s)}" ${s === v.stato ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div><div class="sub" id="cStNota"></div></div>
     <div class="barra-salva"><button class="btn annulla" id="annullaC">Annulla</button><button class="btn pri" id="salva">Salva contatto</button></div>`, () => annullaC());
-    const sporcoC = () => v.esiti.length > 0 || !!v.emerso.trim();
+    const sporcoC = () => (rm ? toccato : v.esiti.length > 0 || !!v.emerso.trim());
     const annullaC = () => {
       leggi(); if (sporcoC() && !confirm('Uscire senza salvare il contatto?')) return;
       if (preset.ritorno) { location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id);
     };
-    const aggiornaBarra = () => (v.esiti.length ? statoBarra(f, 'sporco', 'Salva contatto') : (statoBarra(f, sporcoC() ? 'sporco' : 'vuoto', 'Scegli almeno un esito'), ($('#salva', f).disabled = true)));
+    const aggiornaBarra = () => (rm && !toccato ? statoBarra(f, 'vuoto', 'Nessuna modifica') : v.esiti.length ? statoBarra(f, 'sporco', rm ? 'Salva correzione' : 'Salva contatto') : (statoBarra(f, sporcoC() ? 'sporco' : 'vuoto', 'Scegli almeno un esito'), ($('#salva', f).disabled = true)));
     // avviso se il nuovo stato torna indietro rispetto a quello attuale
     const avvisoStato = () => { const n = $('#cStNota', f); if (!n) return; const st = $('#cSt', f).value; n.innerHTML = !/^Chiuso|Scartato/.test(st) && STATI.indexOf(st) < STATI.indexOf(p.stato) ? `<span class="c-neg">Lo stato torna indietro: da «${esc(p.stato)}» a «${esc(st)}»</span>` : ''; };
     $('#annullaC').onclick = annullaC;
     aggiornaBarra(); avvisoStato();
     $('#cSt', f).onchange = avvisoStato;
-    $('#cEm', f).oninput = () => { v.emerso = $('#cEm', f).value; aggiornaBarra(); };
+    $('#cEm', f).oninput = () => { v.emerso = $('#cEm', f).value; toccato = true; aggiornaBarra(); };
+    ['#cData', '#cInt', '#cPr', '#cEn', '#cSt'].forEach((q) => { const el = $(q, f); if (el) el.addEventListener('input', () => { toccato = true; aggiornaBarra(); }); });
     const leggi = () => { v.data = $('#cData').value; v.interlocutore = $('#cInt').value; v.emerso = $('#cEm').value; v.prossima = $('#cPr').value; v.entro = $('#cEn').value; v.stato = $('#cSt').value; };
     f.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => {
-      leggi();
+      leggi(); toccato = true;
       if (b.dataset.k === 'esito') { // tocco = aggiungi o togli; proposta automatica, modificabile
         const o = b.dataset.v; v.esiti = v.esiti.includes(o) ? v.esiti.filter((x) => x !== o) : [...v.esiti, o];
         proponi();
@@ -669,14 +685,17 @@ function formContatto(zid, id, preset = {}) {
       leggi(); fresco(); if (!v.esiti.length) { toast('Scegli almeno un esito'); return; }
       if (!v.data) v.data = oggi();   // su iPhone il campo data si può svuotare con "Reset"
       const esiti = v.esiti.slice().sort((a, b) => ESITI.indexOf(a) - ESITI.indexOf(b));
-      const z = ST.zone[zid].z; const rid = uid();
-      z.registro = z.registro || {};
-      z.registro[rid] = { id: rid, p: id, data: v.data, canale: v.canale, interlocutore: maiuscole(v.interlocutore, true), esito: esiti.join(' · '), esiti, emerso: v.emerso, prossima: v.prossima, entro: v.entro, u: ora() };
+      const z = ST.zone[zid].z; z.registro = z.registro || {};
+      const voce = { p: id, data: v.data, canale: v.canale, interlocutore: maiuscole(v.interlocutore, true), esito: esiti.join(' · '), esiti, emerso: v.emerso, prossima: v.prossima, entro: v.entro };
+      if (rm) {
+        const att = z.registro[rm.id] || rm; z.registro[rm.id] = { ...att, ...voce, u: nuovoU(att) };
+        if (!ePiuRecente()) { modificato(zid); apriProspect(zid, id, { salvato: 'Contatto corretto' }); return; }
+      } else { const rid = uid(); z.registro[rid] = { id: rid, ...voce, u: ora() }; }
       const campi = { stato: v.stato, prossima: CHIUSI.includes(v.stato) ? '' : v.prossima, data_prossima: CHIUSI.includes(v.stato) ? '' : v.entro };
       if (v.interlocutore && !p.referente) campi.referente = maiuscole(v.interlocutore, true);
       if (preset.giro) campi.giro = { ...p.giro, fatto: true, fatto_il: v.data };
       aggiorna(zid, id, campi);
-      if (preset.ritorno) { toast('✓ Contatto salvato alle ' + oraAdesso()); location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id, { salvato: 'Contatto salvato' });
+      if (preset.ritorno) { toast('✓ Contatto salvato alle ' + oraAdesso()); location.hash = preset.ritorno; chiudiFoglio(); render(); } else apriProspect(zid, id, { salvato: rm ? 'Contatto corretto' : 'Contatto salvato' });
     };
   };
   disegna();

@@ -235,3 +235,5 @@ body.largo .vista{padding-left:max(16px,env(safe-area-inset-left));padding-right
 .stato-tappa.rc{background:var(--home-t);color:#1557B0;border-color:#B9D2F5;margin-right:4px}
 .badge-rc{display:inline-flex;align-items:center;font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;background:var(--home-t);color:#1557B0;border:1px solid #B9D2F5}
 .stato-tappa.ni{background:var(--neg-t);color:var(--r2);border-color:#F2C2BF;margin-right:4px}
+.reg-az{display:flex;gap:6px;margin-top:6px}.reg-az .btn.mini{padding:4px 10px;font-size:12.5px}
+.btn.neg-t{background:var(--neg-t);color:var(--r2);border-color:#F2C2BF}
