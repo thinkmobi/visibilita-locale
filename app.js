@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.12.2';
+const VERSIONE = '0.13.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -370,16 +370,16 @@ const reportCompleto = (z, p) => { if (!aperto(p)) return false; const ur = ulti
 const nonInteressato = (z, p) => { if (p.stato === 'Chiuso perso') return true; const ur = ultimoReg(z, p.id); return !!(ur && esitiDi(ur).includes('Non interessato')); };
 // da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
 const ripassare = (z, p) => { if ((p.giro && p.giro.fatto) || !aperto(p)) return false; const r = ultimoReg(z, p.id); return (r && esitiDi(r).some((e) => e === 'Chiuso' || e === 'Ripassare')) || /^ripassare/i.test(p.prossima || ''); };
-const badgeRC = (z, p) => (reportCompleto(z, p) ? '<span class="badge-rc">Report completo da preparare</span>' : '');
+const badgeRC = (z, p) => (reportCompleto(z, p) && !/report completo/i.test(p.prossima || '') ? '<span class="badge-rc">Report completo da preparare</span>' : '');
 const esitoBreve = (r) => esitiDi(r).map((e) => esc(e)).join(' · ');
-function testoProspect(z, p, extra = '') {
+function testoProspect(z, p, extra = '', opz = {}) {
   const g = urgenza(p); const ur = ultimoReg(z, p.id);
   const quando = p.data_prossima ? (g < 0 ? `<span class="data c-neg">scaduta ${gg(p.data_prossima)}</span>` : g === 0 ? '<span class="data c-low">oggi</span>' : `<span class="data">${gg(p.data_prossima)}</span>`) : '';
   return `<div class="riga"><span class="nome">${esc(p.nome)}</span>${quando}</div>
     <div class="riga"><span class="sub">${esc(p.stato)} · ${esc(z.meta.quartiere)}</span><span class="pill ${prioClasse(p)}">${prioHtml(p.priorita)}</span></div>
     ${ur ? `<div class="ultimo"><span>Ultimo contatto</span> <b>${esitoBreve(ur)}</b> · ${gg(ur.data)}</div>` : ''}
     ${p.prossima ? `<div class="az">→ ${esc(p.prossima)}</div>` : aperto(p) ? '<div class="az c-low">Nessuna prossima azione</div>' : ''}
-    <div class="badges">${badgeRC(z, p)}${badgeSito(z, p)}${badgePG(p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
+    <div class="badges">${opz.senzaRC ? '' : badgeRC(z, p)}${badgeSito(z, p)}${badgePG(p)}${nonRiv(z, p) ? '<span class="badge-nr"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg>Scheda non rivendicata</span>' : ''}</div>${extra}`;
 }
 function cardProspect({ zid, z, p }, extra = '') {
   return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">${testoProspect(z, p, extra)}</div></a>`;
@@ -741,6 +741,12 @@ function vGiro() {
   const contattata = (x) => registro(x.zid, x.p.id).some((r) => r.data === d);
   // da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
   const daRipassare = (x) => ripassare(x.z, x.p);
+  // una sola etichetta per tappa, la più importante; l'esito si legge nella riga "Ultimo contatto"
+  const etichettaTappa = (x) => nonInteressato(x.z, x.p) ? '<span class="stato-tappa ni">✕ Non interessato</span>'
+    : reportCompleto(x.z, x.p) ? '<span class="stato-tappa rc">Report completo</span>'
+    : x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>`
+    : daRipassare(x) ? '<span class="stato-tappa ripassare">↻ Da ripassare</span>'
+    : contattata(x) ? '<span class="stato-tappa visitata">✓ Visitato</span>' : '<span class="stato-tappa">Da visitare</span>';
   const passa = (x) => (!fg.tappa || (fg.tappa === 'da' ? !x.p.giro.fatto && !contattata(x) : fg.tappa === 'ripassare' ? daRipassare(x) : fg.tappa === 'rc' ? reportCompleto(x.z, x.p) : fg.tappa === 'ni' ? nonInteressato(x.z, x.p) : fg.tappa === 'fatte' ? x.p.giro.fatto : fg.tappa === 'contattate' ? contattata(x) && !x.p.giro.fatto : true))
     && (!fg.prio || x.p.priorita === fg.prio) && (!fg.nr || nonRiv(x.z, x.p)) && (!fg.pg || x.p.pg === 'assente');
   const tappe = tutte.filter(passa);
@@ -769,13 +775,11 @@ function vGiro() {
       const ref = [x.p.referente, x.p.telefono].filter(Boolean).join(' · ');
       return `<div class="card tappa ${classeCard(x.p)} ${x.p.giro.fatto ? 'ok-fatto' : ''}">
       <div class="tappa-testa"><span class="num">${x.p.giro.fatto ? '✓' : numTappa[zid + '|' + x.p.id]}</span>
-      ${nonInteressato(x.z, x.p) ? '<span class="stato-tappa ni">✕ Non interessato</span>' : ''}
-      ${reportCompleto(x.z, x.p) ? '<span class="stato-tappa rc">Report completo da preparare</span>' : ''}
-      ${x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Report consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>` : daRipassare(x) ? '<span class="stato-tappa ripassare">↻ Da ripassare</span>' : contattata(x) ? `<span class="stato-tappa visitata">✓ Visitato · ${esc((registro(zid, x.p.id).find((r) => r.data === d) || {}).esito || '')}</span>` : '<span class="stato-tappa">Da visitare</span>'}
+      ${etichettaTappa(x)}
       ${x.p.report && x.p.report.includi === false ? '<span class="sub">senza report</span>' : ''}
       ${sceltaOra(`data-ora="${zid}|${x.p.id}"`, x.p.giro.orario || '')}
       <span class="ordine"><button data-su="${zid}|${x.p.id}" aria-label="Su">↑</button><button data-giu="${zid}|${x.p.id}" aria-label="Giù">↓</button></span></div>
-      <a class="con-mappa" href="#p/${zid}/${x.p.id}">${miniMappa(x.z, x.p)}<div class="card-testo">${testoProspect(x.z, x.p, `<div class="sub ind">${esc(ind.split(',').slice(0, 2).join(','))}${ref ? ' · ' + esc(ref) : ''}</div>`)}</div></a>
+      <a class="con-mappa" href="#p/${zid}/${x.p.id}">${miniMappa(x.z, x.p)}<div class="card-testo">${testoProspect(x.z, x.p, `<div class="sub ind">${esc(ind.split(',').slice(0, 2).join(','))}${ref ? ' · ' + esc(ref) : ''}</div>`, { senzaRC: true })}</div></a>
       <div class="row mt"><a class="btn mini" href="https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(ind)}" target="_blank" rel="noopener">Naviga</a>
       ${x.p.giro.fatto ? `<button class="btn mini" data-annulla="${zid}|${x.p.id}">Riapri tappa</button>` : `<button class="btn mini segna" data-fatto="${zid}|${x.p.id}">Segna consegnato</button>`}
       <button class="btn mini" data-togli="${zid}|${x.p.id}" title="Togli dal giro">✕</button></div></div>`;
