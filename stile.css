@@ -23,17 +23,17 @@ h2{font-size:20px}h3{font-size:16px}
 /* guscio fisso: la pagina non scorre mai, scorre solo il contenuto tra testata e barra delle schede.
    Così su iPhone (Safari e Chrome) testata e barra restano sempre al loro posto, la barra degli indirizzi
    non si ritrae e la barra di stato prende il colore piatto della testata (sfondo del body) */
-html,body{background:linear-gradient(var(--ink) 0 50%,#fff 50% 100%);height:100%;overflow:hidden}   /* sopra: colore della testata, sotto: colore della barra schede */
+html,body{background:#fff;height:100%;overflow:hidden}   /* testata e barra schede sono entrambe bianche */
 /* iOS in modalità app a volte calcola male 100dvh all'avvio (barra sollevata finché non si ruota il telefono):
    il body fisso ai quattro lati prende sempre l'altezza reale della finestra */
 body{display:flex;flex-direction:column;position:fixed;top:0;right:0;bottom:0;left:0;height:auto;width:auto}
 .top{position:relative;flex:none;z-index:5;height:var(--top-h);display:flex;align-items:center;justify-content:space-between;
-  padding:env(safe-area-inset-top,0px) 16px 0;background:var(--ink);color:#fff}
+  padding:env(safe-area-inset-top,0px) 16px 0;background:#fff;color:var(--ink);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;font-family:PlexCond;font-size:19px;font-weight:700;font-display:swap}
 .logo{width:26px;height:26px;display:block}
-.sync{display:flex;align-items:center;gap:6px;background:#2a3840;border:0;border-radius:20px;padding:5px 11px;color:#dfe5e3;font-size:12px}
+.sync{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:5px 11px;color:var(--mute);font-size:12px}
 .sync .dot{width:8px;height:8px;border-radius:50%;background:var(--no)}
-.sync.ok .dot{background:#5fd39b}.sync.att .dot{background:var(--mid)}.sync.err .dot{background:#ff7a5c}
+.sync.ok .dot{background:var(--g2)}.sync.att .dot{background:var(--mid)}.sync.err .dot{background:var(--r2)}
 .vista{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--bg);
   padding:14px max(16px,env(safe-area-inset-right),calc((100% - 728px)/2)) 24px max(16px,env(safe-area-inset-left),calc((100% - 728px)/2))}
 .tab{position:relative;flex:none;z-index:5;display:flex;background:#fff;border-top:1px solid var(--line);padding-bottom:var(--safe-b)}
@@ -79,9 +79,9 @@ label.f textarea{min-height:76px;resize:vertical}
 .box{background:var(--box);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-top:10px}
 .neg{background:var(--neg-t);border-left:4px solid var(--neg);border-radius:8px;padding:10px 12px}
 .foglio{position:fixed;inset:0;z-index:10;background:var(--bg);overflow-y:auto}
-.foglio .testa{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;background:var(--ink);color:#fff}
+.foglio .testa{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;background:#fff;color:var(--ink);border-bottom:1px solid var(--line)}
 .foglio .testa h2{font-size:18px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.foglio .testa button{background:#2a3840;border:0;color:#fff;border-radius:8px;padding:7px 11px}
+.foglio .testa button{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 11px}
 .foglio .corpo{max-width:760px;margin:0 auto;padding:12px 16px}
 .griglia{display:grid;gap:3px;max-width:300px}
 .griglia i{aspect-ratio:1;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 10px PlexMono;color:#fff;font-style:normal}
@@ -167,7 +167,7 @@ select.ora{width:96px;font-family:PlexMono;font-size:16px;font-weight:500;min-he
 .barra-giro{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}
 .barra-giro .btn{white-space:nowrap;padding:9px 11px}
 .barra-giro input[type=date]{width:100%;min-width:0}
-select.ora,.btn.mini{background-color:#fff}
+select.ora,.btn.mini:not(.ink){background-color:#fff}   /* il pulsante scuro "Apri PDF" resta scuro */
 select.ora{background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%235F6B70' stroke-width='1.8'/%3E%3C/svg%3E") no-repeat right 8px center}
 /* pallino di priorità: piccolo, stesso colore della pillola */
 .pt{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:1px;flex:none}
