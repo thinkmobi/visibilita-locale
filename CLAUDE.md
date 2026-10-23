@@ -40,5 +40,6 @@ Questo repo contiene solo codice. I dati stanno nel repo privato `thinkmobi/visi
 - Icone con sfondo trasparente; sulla Home iPhone sfondo #18232A.
 
 ## Test
-- Prima di ogni rilascio: test su telefono simulato (Playwright, viewport 390×664) con GitHub finto in memoria e Leaflet servito in locale, più `node` sui test di `logica.js`.
-- Il banco di prova non è ancora nel repo: va ricostruito in `test/` alla prima sessione.
+- Il banco di prova è in `test/`: `cd test && npm i && npm test`. Deve essere tutto verde prima di ogni rilascio.
+- Contenuto: `node` su `logica.js`, Playwright su telefono simulato (viewport 390×664) con GitHub finto in memoria e Leaflet servito in locale, `motore/report.py` sul PDF di prova.
+- Non copre: sync con GitHub vero, `importa.py` e `siti.py`, Safari reale.
