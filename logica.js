@@ -13,6 +13,7 @@
     locale: ['dal suo locale', 'dal locale', 'Davanti al suo locale'],
     studio: ['dal suo studio', 'dallo studio', 'Davanti al suo studio'],
     circolo: ['dal suo circolo', 'dal circolo', 'Davanti al suo circolo'],
+    scuola: ['dalla sua scuola', 'dalla scuola', 'Davanti alla sua scuola'],
   };
   L.LUOGHI = Object.keys(LUOGO);
   L.ordinale = (n) => ORD[n - 1] || n + '°';

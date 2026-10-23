@@ -100,6 +100,14 @@ test('bozza: ramo «sotto il 3° posto» e ramo «vicino alla sede»', () => {
   assert.match(b.cosa, /La visibilità si ferma vicino alla sede/);
 });
 
+test('luogo «scuola»: elenco, titolo davanti alla scuola, intestazione a distanza', () => {
+  assert.ok(L.LUOGHI.includes('scuola'));
+  const p = { ...P.p1, report: { luogo: 'scuola' } };
+  const zz = { ...z, punti: z.punti.map(([a, b]) => [a, b, ['pB', 'pC']]) };
+  assert.equal(L.bozza(zz, p).titolo, 'Davanti alla sua scuola, su Google non compare.');
+  assert.equal(L.testaLista(z, p), 'A 220 M DALLA SUA SCUOLA');
+});
+
 test('analisi: statistiche e testi', () => {
   const a = L.analisi(z, P.p1);
   assert.equal(a.name, 'Agenzia Alfa');
