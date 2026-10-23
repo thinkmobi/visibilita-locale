@@ -254,6 +254,52 @@ test('9b. nomi con iniziali maiuscole al salvataggio; sigle e forme societarie i
   } finally { await t.chiudi(); }
 });
 
+test('9c. non interessati: fuori da Oggi, Prospect e Giro; visibili solo con il filtro «Non interessati»', async () => {
+  const ieri = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() - 864e5));
+  const t = await apri({ mutaGh: (gh) => {
+    const z = zona(OGGI); z.prospect.p2.stato = 'Contattato'; z.prospect.p2.prossima = 'Richiamare'; z.prospect.p2.data_prossima = OGGI;
+    z.registro = { r1: { id: 'r1', p: 'p2', data: ieri, esito: 'Non interessato', u: 1 } };
+    gh.metti(`zone/${ID}/zona.json`, z);
+  } });
+  const card = (id) => t.page.locator(`#vista a[href="#p/${ID}/${id}"]`);
+  const foto = (n) => process.env.FOTO_DIR && t.page.screenshot({ path: path.join(process.env.FOTO_DIR, n + '.png'), fullPage: true });
+  try {
+    await attendiStato(t.page, /Aggiornato/);
+    await t.page.waitForSelector(`a.card[href="#p/${ID}/p1"]`);
+    assert.equal(await card('p2').count(), 0, 'Oggi: p2 non interessato non deve comparire');
+    assert.match(await testoVista(t.page), /Apri il giro \(1 tappa\)/);
+    await foto('1-oggi');
+    await t.page.locator('.tab a[data-t=prospect]').click();
+    await t.page.waitForSelector('#filtroNI');
+    assert.equal(await card('p2').count(), 0, 'Prospect: p2 fuori dalla lista');
+    assert.equal(await card('p1').count(), 1);
+    assert.match(await t.page.locator('#filtroNI').innerText(), /Non interessati \(1\)/);
+    await t.page.locator('.filtri button[data-f=stato][data-v=""]').click();
+    assert.equal(await card('p2').count(), 0, 'Prospect «Tutti»: p2 resta fuori');
+    await t.page.locator('#filtroNI').click();
+    await t.page.waitForSelector(`a.card[href="#p/${ID}/p2"]`);
+    assert.equal(await card('p1').count(), 0, 'filtro Non interessati: solo p2');
+    assert.equal(await t.page.locator('.filtri button[data-f=stato].on').count(), 0, 'con il filtro attivo nessuno stato è evidenziato');
+    await foto('2-prospect-ni');
+    await t.page.locator('.filtri button[data-f=stato][data-v=aperti]').click();
+    await t.page.waitForSelector(`a.card[href="#p/${ID}/p1"]`);
+    assert.equal(await card('p2').count(), 0, 'uno stato toglie il filtro Non interessati');
+    await t.page.locator('.tab a[data-t=giro]').click();
+    await t.page.waitForSelector('[data-fg=tappa][data-v=ni]');
+    assert.equal(await card('p2').count(), 0, 'Giro: p2 fuori dalle tappe');
+    assert.match(await t.page.locator('[data-fg=tappa][data-v=""]').innerText(), /Tutte \(1\)/);
+    assert.match(await t.page.locator('[data-fg=tappa][data-v=ni]').innerText(), /Non interessati \(1\)/);
+    await foto('3-giro');
+    await t.page.locator('[data-fg=tappa][data-v=ni]').click();
+    await t.page.waitForSelector(`#vista a[href="#p/${ID}/p2"]`);
+    assert.equal(await card('p1').count(), 0);
+    assert.match(await testoVista(t.page), /Non interessato/);
+    assert.match(await testoVista(t.page), /Percorso a piedi \(0 da visitare\)/, 'i non interessati non entrano nel percorso');
+    await foto('4-giro-ni');
+    assert.deepEqual(t.errori, []);
+  } finally { await t.chiudi(); }
+});
+
 test('10. versione: VERSIONE, CACHE e ?v= coincidono; la «v» compare solo nel Profilo', async () => {
   const app = fs.readFileSync(path.join(RADICE, 'app.js'), 'utf8'), sw = fs.readFileSync(path.join(RADICE, 'sw.js'), 'utf8'), html = fs.readFileSync(path.join(RADICE, 'index.html'), 'utf8');
   const v = app.match(/const VERSIONE = '([\d.]+)'/)[1];

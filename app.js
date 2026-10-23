@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.14.0';
+const VERSIONE = '0.15.0';
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
@@ -368,6 +368,8 @@ const ultimoReg = (z, pid) => Object.values(z.registro || {}).filter((r) => !r.d
 const reportCompleto = (z, p) => { if (!aperto(p)) return false; const ur = ultimoReg(z, p.id); return /report completo/i.test(p.prossima || '') || !!(ur && esitiDi(ur).includes('Fare report completo')); };
 // non interessato: stato Chiuso perso o ultimo esito "Non interessato"
 const nonInteressato = (z, p) => { if (p.stato === 'Chiuso perso') return true; const ur = ultimoReg(z, p.id); return !!(ur && esitiDi(ur).includes('Non interessato')); };
+// in lavoro: tutti tranne i non interessati, che restano visibili solo con il filtro «Non interessati»
+const inLavoro = (x) => !nonInteressato(x.z, x.p);
 // da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
 const ripassare = (z, p) => { if ((p.giro && p.giro.fatto) || !aperto(p)) return false; const r = ultimoReg(z, p.id); return (r && esitiDi(r).some((e) => e === 'Chiuso' || e === 'Ripassare')) || /^ripassare/i.test(p.prossima || ''); };
 const badgeRC = (z, p) => (reportCompleto(z, p) && !/report completo/i.test(p.prossima || '') ? '<span class="badge-rc">Report completo da preparare</span>' : '');
@@ -385,9 +387,9 @@ function cardProspect({ zid, z, p }, extra = '') {
   return `<a class="card con-mappa ${classeCard(p)}" href="#p/${zid}/${p.id}">${miniMappa(z, p)}<div class="card-testo">${testoProspect(z, p, extra)}</div></a>`;
 }
 function vOggi() {
-  const tt = tutti(); const ap = tt.filter((x) => aperto(x.p));
+  const tt = tutti(); const tl = tt.filter(inLavoro); const ap = tl.filter((x) => aperto(x.p));
   const scad = ap.filter((x) => urgenza(x.p) < 0), vic = ap.filter((x) => { const g = urgenza(x.p); return g != null && g >= 0 && g <= 2; });
-  const senza = ap.filter((x) => !x.p.prossima || !x.p.data_prossima), mai = tt.filter((x) => !registro(x.zid, x.p.id).length && aperto(x.p));
+  const senza = ap.filter((x) => !x.p.prossima || !x.p.data_prossima), mai = ap.filter((x) => !registro(x.zid, x.p.id).length);
   if (!tt.length) return benvenuto();
   const K = { scad: [scad, 'Azioni scadute', 'c-neg'], vic: [vic, 'Entro 2 giorni', 'c-mid'], senza: [senza, 'Senza prossima azione', 'c-low'], mai: [mai, 'Mai contattati', ''] };
   const sel = ST.f.kpi && K[ST.f.kpi];
@@ -400,7 +402,7 @@ function vOggi() {
   const ordGiro = (a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99);
   const giro = tt.filter((x) => x.p.giro && x.p.giro.data === d).sort(ordGiro);
   const numTappa = {}; const cont = {}; giro.forEach((x) => (numTappa[x.zid + '|' + x.p.id] = cont[x.zid] = (cont[x.zid] || 0) + 1));
-  const giroDaFare = giro.filter((x) => !sentitoOggi(x) && aperto(x.p));
+  const giroDaFare = giro.filter((x) => !sentitoOggi(x) && aperto(x.p) && inLavoro(x));
   const inGiro = new Set(giro.map((x) => x.zid + '|' + x.p.id));
   const richiami = ap.filter((x) => x.p.data_prossima === d && !inGiro.has(x.zid + '|' + x.p.id) && !sentitoOggi(x))
     .sort((a, b) => prioRank(a.p) - prioRank(b.p));
@@ -411,7 +413,7 @@ function vOggi() {
   const vuoto = !giroDaFare.length && !richiami.length;
   return `${kpi}
   <div class="eb">Da fare oggi · ${ggLungo(d)} · ${giroDaFare.length + richiami.length} da contattare${fatti.length ? ` · ${fatti.length} già sentiti` : ''}</div>
-  ${giro.length ? `<div class="row" style="margin-bottom:8px"><a class="btn mini" href="#giro">Apri il giro (${giro.length} tappe)</a></div>` : ''}
+  ${giro.length ? `<div class="row" style="margin-bottom:8px"><a class="btn mini" href="#giro">Apri il giro (${((n) => n + (n === 1 ? ' tappa' : ' tappe'))(giro.filter(inLavoro).length)})</a></div>` : ''}
   ${giroDaFare.length ? `<div class="sub" style="margin:2px 0 6px">Giro di oggi</div><div class="lista">${giroDaFare.map((x) => cardProspect(x, tappa(x))).join('')}</div>` : ''}
   ${richiami.length ? `<div class="sub" style="margin:10px 0 6px">Azioni in scadenza oggi</div><div class="lista">${richiami.map((x) => cardProspect(x)).join('')}</div>` : ''}
   ${vuoto ? `<div class="vuoto">${giro.length || fatti.length ? 'Tutti sentiti per oggi.' : 'Niente in programma per oggi.'}</div>` : ''}
@@ -431,7 +433,9 @@ function benvenuto() {
 /* ---------- vista: prospect ---------- */
 function filtraProspect() {
   const f = ST.f; let tt = tutti();
-  if (f.stato === 'aperti') tt = tt.filter((x) => aperto(x.p)); else if (f.stato) tt = tt.filter((x) => x.p.stato === f.stato);
+  // «Non interessati» sostituisce il filtro di stato; senza, i non interessati restano fuori da ogni lista
+  if (f.ni) tt = tt.filter((x) => !inLavoro(x));
+  else { tt = tt.filter(inLavoro); if (f.stato === 'aperti') tt = tt.filter((x) => aperto(x.p)); else if (f.stato) tt = tt.filter((x) => x.p.stato === f.stato); }
   if (f.prio) tt = tt.filter((x) => x.p.priorita === f.prio);
   if (f.zona) tt = tt.filter((x) => x.zid === f.zona);
   if (f.nr) tt = tt.filter((x) => nonRiv(x.z, x.p));
@@ -443,10 +447,11 @@ function filtraProspect() {
 const listaProspect = (tt) => tt.map((x) => cardProspect(x)).join('') || '<div class="vuoto">Nessun prospect con questi filtri.</div>';
 function vProspect() {
   const f = ST.f; const zoneIds = Object.keys(ST.zone); const tt = filtraProspect();
-  const chip = (campo, val, lab, html) => `<button class="chip ${f[campo] === val ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${html || esc(lab)}</button>`;
+  const chip = (campo, val, lab, html) => `<button class="chip ${f[campo] === val && !(campo === 'stato' && f.ni) ? 'on' : ''}" data-f="${campo}" data-v="${esc(val)}">${html || esc(lab)}</button>`;
+  const lav = tutti().filter((x) => inLavoro(x) && aperto(x.p)); const nNI = tutti().length - tutti().filter(inLavoro).length;
   return `<input class="cerca" id="q" type="search" placeholder="Cerca nome, referente, via…" value="${esc(f.q)}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
-  <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
-  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${tutti().filter((x) => aperto(x.p) && nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${tutti().filter((x) => aperto(x.p) && sitoInfo(x.z, x.p).k !== 'ok').length})</button><button class="chip chip-pg ${f.pg === 'assente' ? 'on' : ''}" data-fpg="assente">Assenti su PG (${tutti().filter((x) => aperto(x.p) && x.p.pg === 'assente').length})</button><button class="chip ${f.pg === 'verifica' ? 'on' : ''}" data-fpg="verifica">PG da verificare (${tutti().filter((x) => aperto(x.p) && !x.p.pg).length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
+  <div class="filtri">${chip('stato', 'aperti', 'Aperti')}${chip('stato', '', 'Tutti')}${nNI || f.ni ? `<button class="chip chip-ni ${f.ni ? 'on' : ''}" id="filtroNI">Non interessati (${nNI})</button>` : ''}${STATI.map((s) => chip('stato', s, s)).join('')}</div>
+  <div class="filtri"><button class="chip chip-nr ${f.nr ? 'on' : ''}" id="filtroNR">Non rivendicate (${lav.filter((x) => nonRiv(x.z, x.p)).length})</button><button class="chip chip-ns ${f.ns ? 'on' : ''}" id="filtroNS">Senza sito proprio (${lav.filter((x) => sitoInfo(x.z, x.p).k !== 'ok').length})</button><button class="chip chip-pg ${f.pg === 'assente' ? 'on' : ''}" data-fpg="assente">Assenti su PG (${lav.filter((x) => x.p.pg === 'assente').length})</button><button class="chip ${f.pg === 'verifica' ? 'on' : ''}" data-fpg="verifica">PG da verificare (${lav.filter((x) => !x.p.pg).length})</button>${chip('prio', '', 'Ogni priorità')}${PRIORITA.map((s) => chip('prio', s, s, prioHtml(s))).join('')}${zoneIds.length > 1 ? chip('zona', '', 'Tutte le zone') + zoneIds.map((z) => chip('zona', z, ST.zone[z].z.meta.quartiere)).join('') : ''}</div>
   <div class="sub" style="margin:4px 0 8px" id="contaP">${tt.length} prospect</div>
   <div class="lista" id="listaP">${listaProspect(tt)}</div>`;
 }
@@ -747,16 +752,17 @@ function vGiro() {
     : x.p.giro.fatto ? `<span class="stato-tappa consegnata">✓ Consegnato${x.p.giro.fatto_il ? ' il ' + gg(x.p.giro.fatto_il) : ''}</span>`
     : daRipassare(x) ? '<span class="stato-tappa ripassare">↻ Da ripassare</span>'
     : contattata(x) ? '<span class="stato-tappa visitata">✓ Visitato</span>' : '<span class="stato-tappa">Da visitare</span>';
-  const passa = (x) => (!fg.tappa || (fg.tappa === 'da' ? !x.p.giro.fatto && !contattata(x) : fg.tappa === 'ripassare' ? daRipassare(x) : fg.tappa === 'rc' ? reportCompleto(x.z, x.p) : fg.tappa === 'ni' ? nonInteressato(x.z, x.p) : fg.tappa === 'fatte' ? x.p.giro.fatto : fg.tappa === 'contattate' ? contattata(x) && !x.p.giro.fatto : true))
+  const passa = (x) => (fg.tappa === 'ni' || inLavoro(x)) && (!fg.tappa || (fg.tappa === 'da' ? !x.p.giro.fatto && !contattata(x) : fg.tappa === 'ripassare' ? daRipassare(x) : fg.tappa === 'rc' ? reportCompleto(x.z, x.p) : fg.tappa === 'ni' ? nonInteressato(x.z, x.p) : fg.tappa === 'fatte' ? x.p.giro.fatto : fg.tappa === 'contattate' ? contattata(x) && !x.p.giro.fatto : true))
     && (!fg.prio || x.p.priorita === fg.prio) && (!fg.nr || nonRiv(x.z, x.p)) && (!fg.pg || x.p.pg === 'assente');
   const tappe = tutte.filter(passa);
   const perZona = {}; tutte.forEach((x) => (perZona[x.zid] = perZona[x.zid] || [])); tappe.forEach((x) => perZona[x.zid].push(x));
-  const nF = (fn) => tutte.filter(fn).length;
+  // conteggi dei filtri sulle tappe in lavoro; i non interessati si contano solo nel loro filtro
+  const nF = (fn) => tutte.filter((x) => inLavoro(x) && fn(x)).length; const nNI = tutte.length - nF(() => true);
   const chipG = (k, v, lab) => `<button class="chip ${fg[k] === v ? 'on' : ''}" data-fg="${k}" data-v="${esc(v)}">${lab}</button>`;
-  const filtriGiro = tutte.length ? `<div class="filtri mt">${chipG('tappa', '', `Tutte (${tutte.length})`)}${chipG('tappa', 'da', `Da visitare (${nF((x) => !x.p.giro.fatto && !contattata(x))})`)}${chipG('tappa', 'contattate', `Contattate (${nF((x) => contattata(x) && !x.p.giro.fatto)})`)}${nF((x) => reportCompleto(x.z, x.p)) ? chipG('tappa', 'rc', `Report completo (${nF((x) => reportCompleto(x.z, x.p))})`) : ''}${nF((x) => nonInteressato(x.z, x.p)) ? chipG('tappa', 'ni', `Non interessati (${nF((x) => nonInteressato(x.z, x.p))})`) : ''}${nF(daRipassare) ? chipG('tappa', 'ripassare', `Da ripassare (${nF(daRipassare)})`) : ''}${chipG('tappa', 'fatte', `Consegnate (${nF((x) => x.p.giro.fatto)})`)}</div>
+  const filtriGiro = tutte.length ? `<div class="filtri mt">${chipG('tappa', '', `Tutte (${nF(() => true)})`)}${chipG('tappa', 'da', `Da visitare (${nF((x) => !x.p.giro.fatto && !contattata(x))})`)}${chipG('tappa', 'contattate', `Contattate (${nF((x) => contattata(x) && !x.p.giro.fatto)})`)}${nF((x) => reportCompleto(x.z, x.p)) ? chipG('tappa', 'rc', `Report completo (${nF((x) => reportCompleto(x.z, x.p))})`) : ''}${nNI ? chipG('tappa', 'ni', `Non interessati (${nNI})`) : ''}${nF(daRipassare) ? chipG('tappa', 'ripassare', `Da ripassare (${nF(daRipassare)})`) : ''}${chipG('tappa', 'fatte', `Consegnate (${nF((x) => x.p.giro.fatto)})`)}</div>
   <div class="filtri">${chipG('prio', '', 'Ogni priorità')}${PRIORITA.filter((s) => tutte.some((x) => x.p.priorita === s)).map((s) => chipG('prio', s, prioHtml(s))).join('')}<button class="chip chip-nr ${fg.nr ? 'on' : ''}" data-fgt="nr">Non rivendicate (${nF((x) => nonRiv(x.z, x.p))})</button><button class="chip chip-pg ${fg.pg ? 'on' : ''}" data-fgt="pg">Assenti su PG (${nF((x) => x.p.pg === 'assente')})</button></div>
-  ${tappe.length < tutte.length ? `<div class="sub" style="margin:2px 0 4px">${tappe.length} di ${tutte.length} tappe con questi filtri</div>` : ''}` : '';
-  const indirizzi = tappe.filter((x) => !x.p.giro.fatto).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
+  ${fg.tappa !== 'ni' && tappe.length < nF(() => true) ? `<div class="sub" style="margin:2px 0 4px">${tappe.length} di ${nF(() => true)} tappe con questi filtri</div>` : ''}` : '';
+  const indirizzi = tappe.filter((x) => !x.p.giro.fatto && inLavoro(x)).map((x) => x.p.indirizzo || (x.z.attivita[x.p.pid] || {}).a).filter(Boolean);
   // anteprima su mappa: tappe con coordinate, numerate come nella lista
   ST.mappaGiro = tappe.map((x) => { const a = x.z.attivita[x.p.pid] || {}; const n = numTappa[x.zid + '|' + x.p.id]; return a.la && a.lo ? { zid: x.zid, id: x.p.id, n, nome: x.p.nome, fatto: !!x.p.giro.fatto, rip: daRipassare(x), rc: reportCompleto(x.z, x.p), ni: nonInteressato(x.z, x.p), vis: contattata(x), la: a.la, lo: a.lo } : null; }).filter(Boolean);
   const senzaCoord = tappe.length - ST.mappaGiro.length;
@@ -1220,7 +1226,8 @@ function legaVista(v) {
   }
   if (v === 'oggi' && $('#oFatti')) $('#oFatti').onclick = () => { ST.f.fatti = !ST.f.fatti; render(); };
   if (v === 'prospect') {
-    V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; render(); }));
+    V.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { ST.f[b.dataset.f] = b.dataset.v; if (b.dataset.f === 'stato') ST.f.ni = false; render(); }));
+    if ($('#filtroNI')) $('#filtroNI').onclick = () => { ST.f.ni = !ST.f.ni; render(); };
     $('#filtroNR').onclick = () => { ST.f.nr = !ST.f.nr; render(); };
     $('#filtroNS').onclick = () => { ST.f.ns = !ST.f.ns; render(); };
     V.querySelectorAll('[data-fpg]').forEach((b) => (b.onclick = () => { ST.f.pg = ST.f.pg === b.dataset.fpg ? '' : b.dataset.fpg; render(); }));
