@@ -1,9 +1,12 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.15.0';
-const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
-const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
+const VERSIONE = '0.16.0';
+const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Vinto', 'Perso', 'Scartato'];
+const CHIUSI = ['Vinto', 'Perso', 'Scartato'];
+// nomi vecchi degli stati: si leggono ancora e diventano quelli nuovi al primo salvataggio della zona
+const STATI_VECCHI = { 'Chiuso vinto': 'Vinto', 'Chiuso perso': 'Perso' };
+const normStato = (p) => { if (p && STATI_VECCHI[p.stato]) p.stato = STATI_VECCHI[p.stato]; return p; };
 const canaleT = (c) => (c === 'Passaggio in agenzia' ? 'Passaggio' : c || '');   // nome vecchio nei contatti già registrati
 const CANALI = ['Telefono', 'Passaggio', 'Visita', 'WhatsApp', 'Email', 'LinkedIn'];
 const ESITI = ['Nessuna risposta', 'Chiuso', 'Segreteria', 'Richiamare', 'Ripassare', 'Report consegnato', 'Fare report completo', 'Interessato', 'Appuntamento fissato', 'Proposta inviata', 'Obiezione', 'Non interessato', 'Firmato'];
@@ -14,7 +17,7 @@ function rinumera(zid, data) {
 }
 const ESITO_STATO = { 'Nessuna risposta': 'Contattato', 'Segreteria': 'Contattato', 'Richiamare': 'Contattato', 'Ripassare': 'Contattato', 'Report consegnato': 'Contattato', 'Fare report completo': 'In attesa di risposta',
   'Interessato': 'In attesa di risposta', 'Appuntamento fissato': 'Visita fissata', 'Proposta inviata': 'Proposta inviata', 'Obiezione': 'Trattativa',
-  'Non interessato': 'Chiuso perso', 'Firmato': 'Chiuso vinto' };
+  'Non interessato': 'Perso', 'Firmato': 'Vinto' };
 /* lo stato avanza con l'esito, non torna indietro (es. "Nessuna risposta" su un prospect in trattativa) */
 /* iniziali maiuscole su nomi e referenti: tocca solo le parole tutte minuscole,
    lascia stare sigle e marchi (RE/MAX, D&D, BERTOLINO) e le forme societarie (s.a.s., srl) */
@@ -270,7 +273,7 @@ async function scarica() {
 }
 
 /* ---------- accesso ai dati ---------- */
-const tutti = () => Object.entries(ST.zone).flatMap(([zid, s]) => Object.values(s.z.prospect || {}).filter((p) => !p.del).map((p) => ({ zid, z: s.z, p })));
+const tutti = () => Object.entries(ST.zone).flatMap(([zid, s]) => Object.values(s.z.prospect || {}).filter((p) => !p.del).map((p) => ({ zid, z: s.z, p: normStato(p) })));
 const registro = (zid, pid) => Object.values(ST.zone[zid].z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1));
 // contatti di prospect ancora presenti (quelli di prospect eliminati non entrano nei conteggi)
 const registroVivo = () => Object.values(ST.zone).flatMap((s) => Object.values(s.z.registro || {}).filter((r) => !r.del && s.z.prospect[r.p] && !s.z.prospect[r.p].del));
@@ -278,7 +281,7 @@ const ultimoContatto = (zid, pid) => (registro(zid, pid)[0] || {}).data || '';
 function aggiorna(zid, pid, campi) { const p = ST.zone[zid].z.prospect[pid]; Object.assign(p, campi); tocca(p, ...Object.keys(campi)); modificato(zid); }
 function urgenza(p) { if (!aperto(p) || !p.data_prossima) return null; return giorni(p.data_prossima); }
 // linea a sinistra = quanto è caldo il prospect, con i colori della legenda priorità (1 Caldo, 2 Tiepido, 0 Invisibile, 3 Rete)
-function classeCard(p) { const pr = 'pr' + ((p.priorita || '')[0] || 'x'); if (p.stato === 'Chiuso vinto') return pr + ' vinto'; if (!aperto(p)) return pr + ' chiuso'; return pr; }
+function classeCard(p) { const pr = 'pr' + ((p.priorita || '')[0] || 'x'); if (p.stato === 'Vinto') return pr + ' vinto'; if (!aperto(p)) return pr + ' chiuso'; return pr; }
 const prioClasse = (p) => 'p' + (p.priorita || '9')[0];
 /* 🟢 caldo, 🟠 tiepido, 🔵 invisibile (categoria a sé), ⚪ rete (franchising, gestione separata) */
 const PALLINO = { 1: '🟢', 0: '🔵', 2: '🟠', 3: '⚪' };
@@ -366,8 +369,8 @@ const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivi
 const ultimoReg = (z, pid) => Object.values(z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1))[0];
 // report completo richiesto e non ancora consegnato: ultimo esito "Fare report completo" o prossima azione sul report completo
 const reportCompleto = (z, p) => { if (!aperto(p)) return false; const ur = ultimoReg(z, p.id); return /report completo/i.test(p.prossima || '') || !!(ur && esitiDi(ur).includes('Fare report completo')); };
-// non interessato: stato Chiuso perso o ultimo esito "Non interessato"
-const nonInteressato = (z, p) => { if (p.stato === 'Chiuso perso') return true; const ur = ultimoReg(z, p.id); return !!(ur && esitiDi(ur).includes('Non interessato')); };
+// non interessato: stato Perso o ultimo esito "Non interessato"
+const nonInteressato = (z, p) => { if (p.stato === 'Perso') return true; const ur = ultimoReg(z, p.id); return !!(ur && esitiDi(ur).includes('Non interessato')); };
 // in lavoro: tutti tranne i non interessati, che restano visibili solo con il filtro «Non interessati»
 const inLavoro = (x) => !nonInteressato(x.z, x.p);
 // da ripassare: tappa non consegnata con ultimo esito Chiuso/Ripassare, o prossima azione "Ripassare"
@@ -497,7 +500,7 @@ function minigriglia(z, pid) {
 }
 function apriProspect(zid, id, opz = {}) {
   const s = ST.zone[zid]; if (!s || !s.z.prospect[id]) { location.hash = '#prospect'; return; }
-  const z = s.z, p = z.prospect[id], a = z.attivita[p.pid] || {};
+  const z = s.z, p = normStato(z.prospect[id]), a = z.attivita[p.pid] || {};
   const m = p.pid && z.punti && z.attivita[p.pid] ? L.metriche(z, p.pid) : null;
   const reg = registro(zid, id);
   const t = p.telefono || a.t, sito = p.sito || a.w;
@@ -671,7 +674,7 @@ function formContatto(zid, id, preset = {}) {
     };
     const aggiornaBarra = () => (rm && !toccato ? statoBarra(f, 'vuoto', 'Nessuna modifica') : v.esiti.length ? statoBarra(f, 'sporco', rm ? 'Salva correzione' : 'Salva contatto') : (statoBarra(f, sporcoC() ? 'sporco' : 'vuoto', 'Scegli almeno un esito'), ($('#salva', f).disabled = true)));
     // avviso se il nuovo stato torna indietro rispetto a quello attuale
-    const avvisoStato = () => { const n = $('#cStNota', f); if (!n) return; const st = $('#cSt', f).value; n.innerHTML = !/^Chiuso|Scartato/.test(st) && STATI.indexOf(st) < STATI.indexOf(p.stato) ? `<span class="c-neg">Lo stato torna indietro: da «${esc(p.stato)}» a «${esc(st)}»</span>` : ''; };
+    const avvisoStato = () => { const n = $('#cStNota', f); if (!n) return; const st = $('#cSt', f).value; n.innerHTML = !CHIUSI.includes(st) && STATI.indexOf(st) < STATI.indexOf(p.stato) ? `<span class="c-neg">Lo stato torna indietro: da «${esc(p.stato)}» a «${esc(st)}»</span>` : ''; };
     $('#annullaC').onclick = annullaC;
     aggiornaBarra(); avvisoStato();
     $('#cSt', f).onchange = avvisoStato;
@@ -1055,7 +1058,7 @@ async function importaFile(files) {
 /* ---------- vista: numeri ---------- */
 function vCruscotto() {
   const tt = tutti(); const regs = registroVivo();
-  const vinti = tt.filter((x) => x.p.stato === 'Chiuso vinto'), persi = tt.filter((x) => x.p.stato === 'Chiuso perso');
+  const vinti = tt.filter((x) => x.p.stato === 'Vinto'), persi = tt.filter((x) => x.p.stato === 'Perso');
   const eur = (n) => (n || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const max = Math.max(1, ...STATI.map((s) => tt.filter((x) => x.p.stato === s).length));
   const sett = piuGiorni(-6);   // ultimi 7 giorni, oggi compreso
@@ -1064,7 +1067,7 @@ function vCruscotto() {
     <button><b>${regs.length}</b><span>Contatti registrati</span></button>
     <button><b>${regs.filter((r) => r.data >= sett).length}</b><span>Contatti ultimi 7 gg</span></button>
     <button><b>${regs.filter((r) => esitiDi(r).includes('Appuntamento fissato')).length}</b><span>Appuntamenti fissati</span></button>
-    <button><b class="c-top">${vinti.length}</b><span>Chiusi vinti</span></button>
+    <button><b class="c-top">${vinti.length}</b><span>Vinti</span></button>
     <button><b>${vinti.length + persi.length ? Math.round(vinti.length / (vinti.length + persi.length) * 100) + '%' : '—'}</b><span>Tasso di chiusura</span></button>
     <button><b>${eur(vinti.reduce((s, x) => s + (+x.p.valore || 0), 0))}</b><span>Valore firmato</span></button>
     <button><b>${eur(tt.filter((x) => aperto(x.p)).reduce((s, x) => s + (+x.p.valore || 0), 0))}</b><span>Valore in proposta</span></button></div>
@@ -1124,7 +1127,7 @@ function vTabella() {
   return `<div class="kpi kpi-t">${kp('Aperti', ap.length, '')}${kp('Azioni scadute', ap.filter((x) => urgenza(x.p) != null && urgenza(x.p) < 0).length, 'scadute', 'c-neg')}${kp('Senza prossima azione', ap.filter((x) => !x.p.prossima || !x.p.data_prossima).length, 'senza', 'c-low')}${kp('Mai contattati', ap.filter((x) => !registro(x.zid, x.p.id).length).length, 'mai')}
     <button><b>${regs.filter((r) => r.data >= piuGiorni(-6)).length}</b><span>Contatti ultimi 7 gg</span></button>
     <button><b>${eur(ap.reduce((s0, x) => s0 + (+x.p.valore || 0), 0))}</b><span>Valore aperto</span></button>
-    <button><b class="c-top">${tutti0.filter((x) => x.p.stato === 'Chiuso vinto').length}</b><span>Chiusi vinti</span></button></div>
+    <button><b class="c-top">${tutti0.filter((x) => x.p.stato === 'Vinto').length}</b><span>Vinti</span></button></div>
   <div class="t-filtri">
     <input class="cerca" id="tq" type="search" placeholder="Cerca nome, referente, telefono, P.IVA…" value="${esc(f.q)}" autocomplete="off" spellcheck="false">
     <select id="tStato">${opz([['aperti', 'Aperti'], ['', 'Tutti gli stati'], ...STATI.map((x) => [x, x])], f.stato)}</select>

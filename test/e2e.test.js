@@ -300,6 +300,43 @@ test('9c. non interessati: fuori da Oggi, Prospect e Giro; visibili solo con il 
   } finally { await t.chiudi(); }
 });
 
+test('9d. stati «Vinto» e «Perso»: i vecchi «Chiuso vinto/Chiuso perso» si leggono e si salvano con il nome nuovo', async () => {
+  const t = await apri({ vista: 'prospect', mutaGh: (gh) => {
+    const z = zona(OGGI); z.prospect.p3.stato = 'Chiuso vinto'; z.prospect.p4.stato = 'Chiuso perso';
+    gh.metti(`zone/${ID}/zona.json`, z);
+  } });
+  const foto = (n) => process.env.FOTO_DIR && t.page.screenshot({ path: path.join(process.env.FOTO_DIR, n + '.png'), fullPage: true });
+  try {
+    await attendiStato(t.page, /Aggiornato/);
+    await t.page.waitForSelector(`a.card[href="#p/${ID}/p1"]`);
+    assert.equal(await t.page.locator(`#vista a[href="#p/${ID}/p3"]`).count(), 0, 'Vinto è chiuso: fuori dagli aperti');
+    await t.page.locator('.filtri button[data-f=stato][data-v=Vinto]').click();
+    await t.page.waitForSelector(`a.card[href="#p/${ID}/p3"]`);
+    assert.match(await testoVista(t.page), /Vinto · Crocetta/);
+    assert.doesNotMatch(await testoVista(t.page), /Chiuso vinto|Chiuso perso/);
+    assert.equal(await t.page.locator('.filtri button[data-f=stato][data-v="Chiuso vinto"]').count(), 0);
+    await foto('5-prospect-vinto');
+    assert.match(await t.page.locator('#filtroNI').innerText(), /Non interessati \(1\)/, 'Perso conta tra i non interessati');
+    await t.page.locator('.tab a[data-t=cruscotto]').click();
+    await t.page.waitForFunction(() => /Vinti/.test(document.querySelector('#vista').innerText));
+    const numeri = await testoVista(t.page);
+    assert.match(numeri, /1\s*Vinti/);
+    assert.doesNotMatch(numeri, /Chiusi vinti|Chiuso vinto/);
+    await foto('6-numeri');
+    // la scheda propone «Vinto» e il salvataggio scrive il nome nuovo
+    await t.page.goto(t.page.url().split('#')[0] + `#p/${ID}/p3`);
+    await t.page.waitForSelector('#salva');
+    assert.equal(await t.page.locator('#foglio select[data-c=stato]').inputValue(), 'Vinto');
+    await t.page.locator('[data-c=prossima]').fill('Mandare il contratto');
+    await t.page.locator('#salva').click();
+    await t.page.waitForFunction(() => /^Salvato/.test(document.querySelector('#syncTxt').textContent), null, { timeout: 8000 });
+    const dati = t.gh.json(`zone/${ID}/zona.json`);
+    assert.equal(dati.prospect.p3.stato, 'Vinto');
+    assert.equal(dati.prospect.p4.stato, 'Perso');
+    assert.deepEqual(t.errori, []);
+  } finally { await t.chiudi(); }
+});
+
 test('10. versione: VERSIONE, CACHE e ?v= coincidono; la «v» compare solo nel Profilo', async () => {
   const app = fs.readFileSync(path.join(RADICE, 'app.js'), 'utf8'), sw = fs.readFileSync(path.join(RADICE, 'sw.js'), 'utf8'), html = fs.readFileSync(path.join(RADICE, 'index.html'), 'utf8');
   const v = app.match(/const VERSIONE = '([\d.]+)'/)[1];

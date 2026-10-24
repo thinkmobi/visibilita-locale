@@ -12,8 +12,10 @@
    5. Visibilità → Aggiornamento automatico ogni 15 minuti. */
 
 const REPO = 'thinkmobi/visibilita-dati';
-const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Chiuso vinto', 'Chiuso perso', 'Scartato'];
-const CHIUSI = ['Chiuso vinto', 'Chiuso perso', 'Scartato'];
+const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Vinto', 'Perso', 'Scartato'];
+const CHIUSI = ['Vinto', 'Perso', 'Scartato'];
+// nomi vecchi degli stati, letti come quelli nuovi
+const STATI_VECCHI = { 'Chiuso vinto': 'Vinto', 'Chiuso perso': 'Perso' };
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];
 const PG = { assente: 'Assente su PG', base: 'PG base', evoluta: 'PG evoluta' };
 
@@ -23,7 +25,7 @@ function costruisciTabelle(zone, oggi) {
   const contatti = [];
   zone.forEach((z) => {
     const reg = Object.values(z.registro || {}).filter((r) => !r.del);
-    Object.values(z.prospect || {}).filter((p) => !p.del).forEach((p) => {
+    Object.values(z.prospect || {}).filter((p) => !p.del).map((p) => (STATI_VECCHI[p.stato] ? { ...p, stato: STATI_VECCHI[p.stato] } : p)).forEach((p) => {
       const rp = reg.filter((r) => r.p === p.id).sort((a, b) => (a.data < b.data ? 1 : -1));
       tutti.push({ z, p, a: (z.attivita || {})[p.pid] || {}, ultimo: rp.length ? rp[0].data : '', n: rp.length, contOggi: rp.find((r) => r.data === (p.giro || {}).data) });
     });
@@ -57,8 +59,8 @@ function costruisciTabelle(zone, oggi) {
   const riep = [['Riepilogo', ''], ['Prospect aperti', ap.length], ['Azioni scadute', ap.filter((x) => x.p.data_prossima && x.p.data_prossima < oggi).length],
     ['Azioni di oggi', ap.filter((x) => x.p.data_prossima === oggi).length], ['Senza prossima azione', ap.filter((x) => !x.p.prossima || !x.p.data_prossima).length],
     ['Mai contattati', ap.filter((x) => !x.n).length], ['Contatti ultimi 7 giorni', contatti.filter((r) => r[1] >= sett).length],
-    ['Valore aperto €', ap.reduce((s, x) => s + val(x), 0)], ['Chiusi vinti', tutti.filter((x) => x.p.stato === 'Chiuso vinto').length],
-    ['Valore firmato €', tutti.filter((x) => x.p.stato === 'Chiuso vinto').reduce((s, x) => s + val(x), 0)], ['', ''], ['Stato', 'Prospect']];
+    ['Valore aperto €', ap.reduce((s, x) => s + val(x), 0)], ['Vinti', tutti.filter((x) => x.p.stato === 'Vinto').length],
+    ['Valore firmato €', tutti.filter((x) => x.p.stato === 'Vinto').reduce((s, x) => s + val(x), 0)], ['', ''], ['Stato', 'Prospect']];
   STATI.forEach((s) => riep.push([s, tutti.filter((x) => x.p.stato === s).length]));
   riep.push(['', ''], ['Priorità (aperti)', 'Prospect']);
   PRIORITA.forEach((s) => riep.push([s, ap.filter((x) => x.p.priorita === s).length]));
