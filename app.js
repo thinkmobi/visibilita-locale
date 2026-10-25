@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.19.0';
+const VERSIONE = '0.20.3';
 /* versione in fondo allo splash di avvio, senza la «v» (che compare solo nel Profilo) */
 { const sv = document.getElementById('splashV'); if (sv) sv.textContent = 'Versione ' + VERSIONE; }
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Vinto', 'Perso', 'Scartato'];
@@ -74,7 +74,7 @@ const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Chiuso': ['Ripass
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
 const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
-const MOTORE = ['motore/report.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt', 'motore/salva.sh', 'motore/esegui_import.sh', 'motore/esegui_report.sh', 'motore/esegui_siti.sh',
+const MOTORE = ['motore/report.py', 'motore/foglio.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt', 'motore/salva.sh', 'motore/esegui_import.sh', 'motore/esegui_report.sh', 'motore/esegui_siti.sh',
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
@@ -190,7 +190,8 @@ function unisci(loc, rem) {
   const base = scansioneLoc ? lm : rm, testi = piuRecente(lm, rm);
   if (scansioneLoc && loc.punti) z.punti = loc.punti;
   z.meta = { ...base };
-  for (const k of ['frase_kw', 'centrata', 'luogo', 'prossimo_passo', 'quartiere', 'citta']) if (testi[k] !== undefined) z.meta[k] = testi[k];
+  if (rem.punti_ai && !scansioneLoc) for (const k of ['report_key_ai', 'data_ai']) if (rm[k] !== undefined) z.meta[k] = rm[k];
+  for (const k of ['frase_kw', 'centrata', 'luogo', 'prossimo_passo', 'quartiere', 'citta', 'categoria']) if (testi[k] !== undefined) z.meta[k] = testi[k];
   z.meta.u = Math.max(lm.u || 0, rm.u || 0);
   for (const k of ['prospect', 'registro']) {
     z[k] = { ...(rem[k] || {}) };
@@ -366,7 +367,7 @@ function badgeSito(z, p) {
 const PG = { assente: 'Assente su PG', base: 'PG base', evoluta: 'PG evoluta' };
 const urlPG = (z, p) => `https://www.paginegialle.it/ricerca/${encodeURIComponent(p.nome || '')}/${encodeURIComponent(z.meta.citta || '')}`;
 const badgePG = (p) => (PG[p.pg] ? `<span class="badge-pg pg-${p.pg}"><b>PG</b>${esc(PG[p.pg])}</span>` : '');
-const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false);
+const nonRiv = (z, p) => !!(p.pid && z.attivita && z.attivita[p.pid] && z.attivita[p.pid].c === false && z.attivita[p.pid].cv);
 // ultimo contatto registrato di un prospect (più recente per data, poi per ora di inserimento)
 const ultimoReg = (z, pid) => Object.values(z.registro || {}).filter((r) => !r.del && r.p === pid).sort((a, b) => (b.data + b.u > a.data + a.u ? 1 : -1))[0];
 // report completo richiesto e non ancora consegnato: ultimo esito "Fare report completo" o prossima azione sul report completo
@@ -512,7 +513,7 @@ function sezioneAI(z, p) {
 function apriProspect(zid, id, opz = {}) {
   const s = ST.zone[zid]; if (!s || !s.z.prospect[id]) { location.hash = '#prospect'; return; }
   const z = s.z, p = normStato(z.prospect[id]), a = z.attivita[p.pid] || {};
-  const m = p.pid && z.punti && z.attivita[p.pid] ? L.metriche(z, p.pid) : null;
+  const m = p.pid && z.punti && z.punti.length && z.attivita[p.pid] ? L.metriche(z, p.pid) : null;
   const reg = registro(zid, id);
   const t = p.telefono || a.t, sito = p.sito || a.w;
   const nav = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent((p.indirizzo || a.a || p.nome))}`;
@@ -555,14 +556,7 @@ function apriProspect(zid, id, opz = {}) {
   ${reg.map((r) => `<div class="reg"><div class="riga"><b>${esc(r.esito || r.canale)}</b><span class="data">${gg(r.data)} · ${esc(canaleT(r.canale))}</span></div>
      ${r.interlocutore ? `<div class="sub">con ${esc(r.interlocutore)}</div>` : ''}${r.emerso ? `<div>${esc(r.emerso)}</div>` : ''}${r.prossima ? `<div class="sub">→ ${esc(r.prossima)} ${r.entro ? 'entro ' + esc(gg(r.entro)) : ''}</div>` : ''}
      <div class="reg-az"><button class="btn mini" data-rmod="${esc(r.id)}">Modifica</button><button class="btn mini neg-t" data-rdel="${esc(r.id)}">Elimina</button></div></div>`).join('') || '<div class="sub">Nessun contatto registrato.</div>'}
-  ${an ? `<div class="eb">Report da stampare</div>
-  <label class="f"><input type="checkbox" data-r="includi" ${p.report && p.report.includi === false ? '' : 'checked'} style="display:inline;width:auto;margin-right:6px">Includi nella stampa del giro</label>
-  <label class="f">Titolo<textarea data-r="titolo">${esc(an.title)}</textarea></label>
-  <label class="f">Cosa vuol dire<textarea data-r="cosa" style="min-height:110px">${esc(an.cosa)}</textarea></label>
-  <div class="row mt"><button class="btn mini" id="bozza">Rigenera bozza dai dati</button><span class="sub">sovrascrive titolo e testo</span></div>
-  <div class="due"><label class="f">Nome breve in stampa<input id="breve" value="${esc(a.b || '')}"></label>
-  <label class="f">Riferimento${sel('luogo', L.LUOGHI, (p.report && p.report.luogo) || z.meta.luogo || 'ufficio').replace('data-c="luogo"', 'data-r="luogo"')}</label></div>
-  <label class="f">Sottotitolo<input data-r="sottotitolo" value="${esc(an.subtitle)}"></label>
+  ${an ? `<label class="f mt"><input type="checkbox" data-r="includi" ${p.report && p.report.includi === false ? '' : 'checked'} style="display:inline;width:auto;margin-right:6px">Includi nel PDF del giro</label>
   ` : ''}
   <div class="eb">Dati</div>
   ${inp('nome', 'Nome')}${inp('referente', 'Referente')}
@@ -751,9 +745,27 @@ async function disegnaMappaGiro() {
 }
 function vGiro() {
   const tt = tutti().filter((x) => x.p.giro && x.p.giro.data);
-  const date = [...new Set(tt.map((x) => x.p.giro.data))].sort();
-  if (!ST.giroData) ST.giroData = date.find((d) => d >= oggi()) || date[date.length - 1] || oggi();
+  // nel menu delle date restano i giri da fare: una data passata con tutte le tappe consegnate
+  // (es. dopo «Sposta giro», dove le consegnate restano alla data vecchia) sparisce; si riapre dal campo data
+  const og = oggi();
+  // all'apertura, al cambio di giorno e dopo una lunga pausa il giro riparte da oggi
+  // con oggi vuoto si apre direttamente il prossimo giro con tappe da fare
+  if (ST.giroGiorno !== og || !ST.giroData) {
+    const prossimo = tt.filter((x) => x.p.giro.data > og && !x.p.giro.fatto && aperto(x.p)).map((x) => x.p.giro.data).sort()[0];
+    ST.giroData = tt.some((x) => x.p.giro.data === og) || !prossimo ? og : prossimo;
+    // la scelta diventa definitiva solo quando i dati sono arrivati (al primo disegno le zone possono essere ancora vuote)
+    if (Object.keys(ST.zone).length) ST.giroGiorno = og;
+  }
+  const date = [...new Set(tt.filter((x) => x.p.giro.data >= og || (!x.p.giro.fatto && aperto(x.p))).map((x) => x.p.giro.data))];
+  // oggi c'è sempre; la data scelta dal campo resta visibile finché è selezionata
+  for (const x of [og, ST.giroData]) if (!date.includes(x)) date.push(x);
+  date.sort();
   const d = ST.giroData;
+  // tappe ancora da fare per data, per il numero sulle date
+  const daFare = {}; tt.forEach((x) => { if (!x.p.giro.fatto && aperto(x.p)) daFare[x.p.giro.data] = (daFare[x.p.giro.data] || 0) + 1; });
+  const domani = new Date(og + 'T12:00'); domani.setDate(domani.getDate() + 1); const dm = domani.toISOString().slice(0, 10);
+  const etichettaData = (x) => (x === og ? 'Oggi' : x === dm ? 'Domani' : ggLungo(x)) + (daFare[x] ? ` · ${daFare[x]}` : '');
+  const prossima = date.find((x) => x > og && daFare[x]);
   const tutte = tt.filter((x) => x.p.giro.data === d).sort((a, b) => a.zid.localeCompare(b.zid) || (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99));
   // numero di tappa fisso (posizione nel giro della zona), anche quando i filtri nascondono qualcosa
   const numTappa = {}; const cont = {}; tutte.forEach((x) => (numTappa[x.zid + '|' + x.p.id] = cont[x.zid] = (cont[x.zid] || 0) + 1));
@@ -783,7 +795,7 @@ function vGiro() {
   const senzaCoord = tappe.length - ST.mappaGiro.length;
   const percorso = (arr) => { const dest = arr[arr.length - 1]; const wp = arr.slice(0, -1).slice(0, 9); return `https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=${encodeURIComponent(dest)}${wp.length ? '&waypoints=' + encodeURIComponent(wp.join('|')) : ''}`; };
   return `<div class="barra-giro"><input type="date" id="gData" class="cerca" value="${d}"><button class="btn" id="gAgg">+ Tappa</button>${tutte.length ? '<button class="btn" id="gSposta">Sposta…</button>' : ''}</div>
-  <div class="filtri mt">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''}" data-gd="${esc(x)}">${esc(ggLungo(x))}</button>`).join('')}</div>
+  <div class="filtri mt date-giro">${date.map((x) => `<button class="chip ${x === d ? 'on' : ''} ${x < og ? 'arretrato' : ''}" data-gd="${esc(x)}" ${x < og ? 'title="Giro passato con tappe ancora da fare"' : ''}>${esc(etichettaData(x))}</button>`).join('')}</div>
   ${filtriGiro}
   ${tappe.length ? `<div class="row mt"><a class="btn ink" href="${indirizzi.length ? percorso(indirizzi) : '#giro'}" target="_blank" rel="noopener">${ico('map')} Percorso a piedi (${indirizzi.length} da visitare)</a></div>
   ${indirizzi.length > 10 ? '<div class="avviso">Google Maps accetta al massimo 10 tappe per percorso: le altre si aprono dalla singola tappa.</div>' : ''}` : ''}
@@ -812,10 +824,10 @@ function vGiro() {
       const fuori = arr.filter((x) => !(x.p.pid && x.z.attivita[x.p.pid]));
       const ai = L.haAI(ST.zone[zid].z);
       // un solo pulsante: con la scansione AI Mode escono i fogli (uno per tappa), senza esce il report del giro
-      return `<div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${ai ? `${stampa.length} fogli A4` : `${Math.ceil(stampa.length / 2)} fogli A4`}</span></div>
+      return `<div class="box"><div class="riga"><b>Stampa del giro</b><span class="sub">${stampa.length} fogli A4${ai ? '' : ' · solo Google Maps'}</span></div>
       ${fuori.length ? `<div class="avviso">Senza pagina nel PDF perché non compaiono nella scansione: ${fuori.map((x) => esc(x.p.nome)).join(', ')}.</div>` : ''}
       <div class="row mt"><button class="btn pri" data-stampa="${zid}" ${ST.pdf[zid] ? 'disabled' : ''}>Genera PDF</button><span id="st-${zid}" class="sub">${ST.pdfMsg[zid] || ''}</span></div></div>`;
-    })()}`; }).join('') || '<div class="vuoto">Nessuna tappa in questa data. Aggiungila con “+ Tappa”.</div>'}`;
+    })()}`; }).join('') || `<div class="vuoto">Nessuna tappa ${d === og ? 'oggi' : 'in questa data'}. Aggiungila con “+ Tappa”.${d === og && prossima ? `<div class="mt"><button class="btn" data-gd="${esc(prossima)}">Prossimo giro: ${esc(prossima === dm ? 'domani' : ggLungo(prossima))}</button></div>` : ''}</div>`}`;
 }
 /* sposta in blocco le tappe di un giro a un'altra data: tutte o solo quelle scelte */
 function formSpostaGiro() {
@@ -844,11 +856,12 @@ function formSpostaGiro() {
       const z = ST.zone[zid].z, p = z.prospect[id];
       // le tappe spostate si accodano a quelle già previste nella nuova data
       p.giro = { ...p.giro, data: a, ordine: prossimoOrdine(zid, a) };
+      const campi = ['giro'];
       if (conAz) {
-        if (p.data_prossima === da) p.data_prossima = a;
-        if (p.visita_entro) p.visita_entro = piuGiorni(delta, p.visita_entro);
+        if (p.data_prossima === da) { p.data_prossima = a; campi.push('data_prossima'); }
+        if (p.visita_entro) { p.visita_entro = piuGiorni(delta, p.visita_entro); campi.push('visita_entro'); }
       }
-      tocca(p, 'giro', 'data_prossima', 'visita_entro'); zone.add(zid);
+      tocca(p, ...campi); zone.add(zid);
     }
     // rinumera le tappe rimaste nella data di partenza
     for (const zid of zone) {
@@ -890,7 +903,6 @@ async function generaPdf(zid, tipo = 'giro') {
     .sort((a, b) => (a.p.giro.ordine || 99) - (b.p.giro.ordine || 99)).map((x) => x.p);
   if (!ps.length) { toast('Nessuna analisi da stampare'); return; }
   const firma = ST.conf.firma && ST.conf.firma.nome ? ST.conf.firma : null;
-  if (tipo === 'fogli' && !L.haAI(z)) { toast('Manca la scansione AI Mode della zona'); return; }
   const job = tipo === 'fogli' ? L.jobFogli(z, ps, { data: oggi(), firma }) : L.jobStampa(z, ps, { data: z.meta.data, firma });
   blocca(true);
   try {
@@ -1003,10 +1015,12 @@ function testiZona(zid) {
   <label class="f">Invito<textarea data-pp="outro">${esc(pp.outro)}</textarea></label>
   <div class="barra-salva"><button class="btn annulla neutro" id="tChiudi">Chiudi</button><button class="btn pri" disabled>Si salva a ogni modifica</button></div>`, () => apriZona(zid));
   $('#tChiudi', f).onclick = () => apriZona(zid);
-  const salva = () => { m.u = ora(); modificato(zid); statoBarra(f, 'salvato'); };
-  f.querySelectorAll('[data-m]').forEach((el) => (el.onchange = () => { m[el.dataset.m] = el.value; salva(); }));
-  f.querySelectorAll('[data-pp]').forEach((el) => (el.onchange = () => { pp[el.dataset.pp] = el.value; salva(); }));
-  f.querySelectorAll('[data-it]').forEach((el) => (el.onchange = () => { const [i, j] = el.dataset.it.split('|'); pp.items[i][j] = el.value; salva(); }));
+  const meta = () => ST.zone[zid].z.meta;
+  const ppOra = () => { const mm = meta(); if (!mm.prossimo_passo) mm.prossimo_passo = JSON.parse(JSON.stringify(pp)); return mm.prossimo_passo; };
+  const salva = () => { meta().u = ora(); modificato(zid); statoBarra(f, 'salvato'); };
+  f.querySelectorAll('[data-m]').forEach((el) => (el.onchange = () => { meta()[el.dataset.m] = el.value; salva(); }));
+  f.querySelectorAll('[data-pp]').forEach((el) => (el.onchange = () => { ppOra()[el.dataset.pp] = el.value; salva(); }));
+  f.querySelectorAll('[data-it]').forEach((el) => (el.onchange = () => { const [i, j] = el.dataset.it.split('|'); ppOra().items[i][j] = el.value; salva(); }));
 }
 function formScansione() {
   const f = apriFoglio('Nuova zona da Local Falcon', `
@@ -1034,7 +1048,7 @@ function formScansione() {
     try {
       await GH.putJSON(`zone/${id}/richiesta.json`, rq, await GH.sha(`zone/${id}/richiesta.json`), `Richiesta import ${id}`);
       out.textContent = 'Richiesta inviata. Import in corso su GitHub (1-3 minuti): puoi chiudere, la zona compare da sola.';
-      attendiImport(id, k, out);
+      attendiImport(id, k, out, rq.creata);
     } catch (e) { out.innerHTML = `<span class="c-neg">${esc(e.message)}</span>`; }
   };
 }
@@ -1070,6 +1084,8 @@ async function attendiImport(id, k, out, creata = null) {
       if (e.data.stato === 'ok') {
         await scarica();
         const z = ST.zone[id]; if (z && !z.z.meta.luogo) { const rq = await GH.getJSON(`zone/${id}/richiesta.json`); z.z.meta.luogo = rq && rq.data.luogo || 'ufficio'; z.z.meta.u = ora(); modificato(id); }
+        const avAI = (e.data.avviso || '').split('; ').find((x) => x.startsWith('AI Mode non importato'));
+        if (avAI) { const m = `Zona importata, ma ${avAI.replace('AI Mode non importato', 'AI Mode non è stato importato')}.`; if (out) out.innerHTML = `<span class="c-neg">${esc(m)}</span>`; else toast(m, 8000); return; }
         toast(`Zona importata: ${e.data.attivita} attività`); if (out) out.textContent = 'Zona importata.'; return;
       }
       if (out) out.innerHTML = `<span class="c-neg">Import non riuscito: ${esc(e.data.messaggio)}</span>`; else toast('Import non riuscito: ' + e.data.messaggio, 6000);
@@ -1285,6 +1301,8 @@ function legaVista(v) {
     $('#gAgg').onclick = scegliTappa;
     const gs = $('#gSposta'); if (gs) gs.onclick = formSpostaGiro;
     V.querySelectorAll('[data-gd]').forEach((b) => (b.onclick = () => { ST.giroData = b.dataset.gd; render(); }));
+    // la data selezionata resta sempre in vista al centro della fila, anche con molte date
+    { const on = V.querySelector('.date-giro .chip.on'); if (on) { const r = on.parentElement; r.scrollLeft += on.getBoundingClientRect().left - r.getBoundingClientRect().left - (r.clientWidth - on.offsetWidth) / 2; } }
     V.querySelectorAll('[data-fg]').forEach((b) => (b.onclick = () => { ST.fg[b.dataset.fg] = ST.fg[b.dataset.fg] === b.dataset.v ? '' : b.dataset.v; render(); }));
     V.querySelectorAll('[data-fgt]').forEach((b) => (b.onclick = () => { ST.fg[b.dataset.fgt] = !ST.fg[b.dataset.fgt]; render(); }));
     V.querySelectorAll('[data-su],[data-giu]').forEach((b) => (b.onclick = () => { const [zid, id] = (b.dataset.su || b.dataset.giu).split('|'); spostaTappa(zid, id, b.dataset.su ? -1 : 1); }));
@@ -1292,7 +1310,7 @@ function legaVista(v) {
     V.querySelectorAll('[data-fatto]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.fatto.split('|'); formContatto(zid, id, { canale: 'Passaggio', esito: 'Report consegnato', giro: true, ritorno: '#giro' }); }));
     V.querySelectorAll('[data-annulla]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.annulla.split('|'); const p = ST.zone[zid].z.prospect[id]; aggiorna(zid, id, { giro: { ...p.giro, fatto: false, fatto_il: '' } }); ST.restaScroll = true; render(); }));
     V.querySelectorAll('[data-togli]').forEach((b) => (b.onclick = () => { const [zid, id] = b.dataset.togli.split('|'); const d = (ST.zone[zid].z.prospect[id].giro || {}).data; aggiorna(zid, id, { giro: {} }); rinumera(zid, d); modificato(zid); ST.restaScroll = true; render(); }));
-    V.querySelectorAll('[data-stampa]').forEach((b) => (b.onclick = () => generaPdf(b.dataset.stampa, L.haAI(ST.zone[b.dataset.stampa].z) ? 'fogli' : 'giro')));
+    V.querySelectorAll('[data-stampa]').forEach((b) => (b.onclick = () => generaPdf(b.dataset.stampa, 'fogli')));
   }
   if (v === 'zone') {
     $('#nuovaScan').onclick = formScansione;
@@ -1354,6 +1372,11 @@ function ricalcolaFinestra() {
 ['resize', 'orientationchange'].forEach((ev) => window.addEventListener(ev, () => { adattaAltezza(); setTimeout(adattaAltezza, 350); }));
 window.addEventListener('pageshow', () => setTimeout(ricalcolaFinestra, 50));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(ricalcolaFinestra, 200); });
+// iPhone tiene l'app in memoria per giorni: dopo 30 minuti in background il giro riparte da oggi
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { ST.nascosta = Date.now(); return; }
+  if (ST.nascosta && Date.now() - ST.nascosta > 30 * 60000) { ST.giroGiorno = null; if (location.hash.startsWith('#giro')) render(); }
+});
 document.addEventListener('focusout', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) ricalcolaFinestra(); }, 160); });
 [0, 300, 1000].forEach((t) => setTimeout(adattaAltezza, t));
 
