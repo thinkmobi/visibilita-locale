@@ -107,8 +107,6 @@ table.cl tr.me td{background:#EAF1FD;font-weight:600;font-display:swap}
 .mt{margin-top:12px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .btn.mini{white-space:nowrap}
-.griglia i.perso{outline:1.5px dashed var(--ink);outline-offset:1.5px}
-.griglia-legenda .perso-ico{background:var(--r2);outline:1.5px dashed var(--ink);outline-offset:1px}
 .griglia-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12px;color:var(--mute)}.griglia-legenda i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
 .card.con-mappa{display:flex;gap:11px;align-items:center}.card-testo{flex:1;min-width:0}
 .mini{flex:none;display:block;border-radius:7px;background:#F4F5F3;padding:0}.mini.vuota{background:repeating-linear-gradient(45deg,#F4F5F3 0 4px,#E6E9E5 4px 8px);border-radius:7px}
@@ -241,3 +239,10 @@ body.largo .vista{padding-left:max(16px,env(safe-area-inset-left));padding-right
 .reg-az{display:flex;gap:6px;margin-top:6px}.reg-az .btn.mini{padding:4px 10px;font-size:12.5px}
 .btn.neg-t{background:var(--neg-t);color:var(--r2);border-color:#F2C2BF}
 .tappa-testa .stato-tappa{white-space:nowrap}
+
+/* splash di avvio AGENTICA: fondo inchiostro, logotipo negativo (avorio con barra clay) */
+.splash{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:#1F1E1B;pointer-events:none;opacity:1;transition:opacity .4s ease}
+.splash.via{opacity:0}
+.splash-v{position:absolute;left:0;right:0;bottom:calc(28px + env(safe-area-inset-bottom,0px));text-align:center;font:400 12px/1.5 ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.08em;color:#87867F}
+.splash-logo{width:min(64vw,320px);height:auto;max-width:100%}
+@media (prefers-reduced-motion: reduce){.splash{transition:none}}
