@@ -1,9 +1,16 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.20.3';
+const VERSIONE = '0.22.0';
 /* versione in fondo allo splash di avvio, senza la «v» (che compare solo nel Profilo) */
-{ const sv = document.getElementById('splashV'); if (sv) sv.textContent = 'Versione ' + VERSIONE; }
+/* ambiente: lo decide l'indirizzo dell'app (…/visibilita-locale-stage/ è stage, il resto è produzione) */
+const AMBIENTE = /-stage\//.test(location.pathname) ? 'stage' : 'prod';
+const AMB_NOME = AMBIENTE === 'stage' ? 'Stage' : 'Produzione';
+// stage salva su un database e una chiave propri: nello stesso browser non tocca il collegamento della produzione
+const SUFF = AMBIENTE === 'stage' ? '-stage' : '';
+const CHIAVE_CFG = 'vl-cfg' + SUFF;
+{ const sv = document.getElementById('splashV'); if (sv) sv.innerHTML = `<span class="amb amb-${AMBIENTE}">${AMB_NOME}</span>Versione ${VERSIONE}`; }
+document.documentElement.dataset.amb = AMBIENTE;
 const STATI = ['Da contattare', 'Contattato', 'In attesa di risposta', 'Visita fissata', 'Visita fatta', 'Proposta inviata', 'Trattativa', 'Vinto', 'Perso', 'Scartato'];
 const CHIUSI = ['Vinto', 'Perso', 'Scartato'];
 // nomi vecchi degli stati: si leggono ancora e diventano quelli nuovi al primo salvataggio della zona
@@ -107,7 +114,7 @@ const DB = (() => {
   let dbp; const mem = {};
   // iOS a volte perde la connessione all'archivio quando l'app torna dallo sfondo: si riapre e si riprova una volta
   const open = () => dbp || (dbp = new Promise((ok, ko) => {
-    const r = indexedDB.open('visibilita', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    const r = indexedDB.open('visibilita' + SUFF, 1); r.onupgradeneeded = () => r.result.createObjectStore('kv');
     r.onsuccess = () => { const db = r.result; db.onclose = () => { dbp = null; }; db.onversionchange = () => { db.close(); dbp = null; }; ok(db); };
     r.onerror = () => { dbp = null; ko(r.error); }; r.onblocked = () => { dbp = null; ko(new Error('archivio bloccato')); };
   }));
@@ -297,6 +304,14 @@ const prioHtml = (pr) => (pr ? `${pallino(pr)}${esc(pr)}` : '—');
 /* ---------- router ---------- */
 const VISTE = { oggi: vOggi, prospect: vProspect, giro: vGiro, zone: vZone, cruscotto: vCruscotto, tabella: vTabella, altro: vAltro };
 const TITOLI = { oggi: 'Oggi', prospect: 'Prospect', giro: 'Giro', zone: 'Zone', cruscotto: 'Numeri', tabella: 'Tabella', altro: 'Profilo' };
+/* app e dati devono essere dello stesso ambiente: stage con visibilita-dati (o produzione con …-stage) va segnalato */
+function avvisoAmbiente() {
+  const r = ST.cfg && ST.cfg.repo;
+  if (!r || (AMBIENTE === 'stage') === /-stage$/.test(r)) return '';
+  return `<div class="amb-avviso" role="alert">${AMBIENTE === 'stage'
+    ? `App di stage collegata ai <b>dati di produzione</b> (${esc(r)}). Le prove finiscono sui dati veri: in Profilo imposta visibilita-dati-stage.`
+    : `App di produzione collegata ai <b>dati di prova</b> (${esc(r)}). In Profilo imposta visibilita-dati.`}</div>`;
+}
 function render() {
   const [vista, a, b] = (location.hash.slice(1) || 'oggi').split('/');
   document.querySelectorAll('.tab a').forEach((x) => x.classList.toggle('on', x.dataset.t === vista));
@@ -304,7 +319,7 @@ function render() {
   $('#titolo').textContent = TITOLI[vista] || 'Visibilità';
   if (VISTE[vista]) {
     const V0 = $('#vista'), scroll = V0.scrollTop, cambio = ST.vistaAttuale !== vista;
-    V0.innerHTML = VISTE[vista](); legaVista(vista);
+    V0.innerHTML = avvisoAmbiente() + VISTE[vista](); legaVista(vista);
     V0.scrollTop = ST.restaScroll || !cambio ? scroll : 0;   // cambiando scheda si riparte dall'alto
     ST.vistaAttuale = vista;
   }
@@ -949,12 +964,39 @@ async function apriPdf(zid, file, w0) {
 }
 
 /* ---------- vista: zone ---------- */
+// cosa resta da fare in una zona: tappe da visitare e da ripassare, richiami scaduti o di oggi, prospect mai contattati,
+// report completi da preparare, prossima data di giro; consegnati in coda. I non interessati e i chiusi non contano
+function lavoroZona(z) {
+  const og = oggi();
+  const tutti = Object.values(z.prospect || {}).filter((p) => !p.del);
+  const ap = tutti.filter((p) => aperto(p) && !nonInteressato(z, p));
+  const rip = ap.filter((p) => ripassare(z, p));
+  const vis = ap.filter((p) => p.giro && p.giro.data && !p.giro.fatto && p.giro.data >= og && !ripassare(z, p));
+  // chi è già nel giro o da ripassare si conta lì, non tra i richiami
+  const ric = ap.filter((p) => { const g = urgenza(p); return g !== null && g <= 0 && !vis.includes(p) && !rip.includes(p); });
+  const scad = ric.filter((p) => urgenza(p) < 0).length;
+  const nuovi = ap.filter((p) => p.stato === 'Da contattare' && !p.giro && !ultimoReg(z, p.id) && !p.data_prossima);
+  const rc = ap.filter((p) => reportCompleto(z, p));
+  const cons = tutti.filter((p) => p.giro && p.giro.fatto).length;
+  const prox = ap.filter((p) => p.giro && p.giro.data && !p.giro.fatto && p.giro.data >= og).map((p) => p.giro.data).sort()[0];
+  const pill = (cl, t) => `<span class="stato-tappa ${cl}">${t}</span>`;
+  const out = [];
+  if (vis.length) out.push(pill('', `${vis.length} da visitare`));
+  if (rip.length) out.push(pill('ripassare', `↻ ${rip.length} da ripassare`));
+  if (ric.length) out.push(pill(scad ? 'ni' : 'ripassare', `${ric.length} da richiamare${scad ? ` (${scad} in ritardo)` : ''}`));
+  if (rc.length) out.push(pill('rc', `${rc.length} report completo`));
+  if (nuovi.length) out.push(pill('visitata', `${nuovi.length} mai ${nuovi.length === 1 ? 'contattato' : 'contattati'}`));
+  if (!out.length) out.push(pill('', 'Niente in sospeso'));
+  if (cons) out.push(pill('consegnata', `✓ ${cons} ${cons === 1 ? 'consegnato' : 'consegnati'}`));
+  const giro = prox ? `<span class="sub">${prox === og ? 'Giro oggi' : 'Prossimo giro ' + gg(prox)}</span>` : '';
+  return `<div class="lavoro-zona">${out.join('')}${giro}</div>`;
+}
 function vZone() {
   const ids = Object.keys(ST.zone).sort().reverse();
   return `<div class="row"><button class="btn pri" id="nuovaScan">Nuova zona da Local Falcon</button><label class="btn">Importa file zona<input type="file" id="impZona" accept=".json,.png" multiple hidden></label></div>
   <div class="lista mt">${ids.map((id) => { const z = ST.zone[id].z; const np = Object.values(z.prospect || {}).filter((p) => !p.del).length;
     return `<a class="card" href="#z/${id}"><div class="riga"><span class="nome">${esc(z.meta.quartiere)}, ${esc(z.meta.citta)}</span><span class="data">${gg(z.meta.data)}</span></div>
-    <div class="sub">«${esc(z.meta.keyword)}» · ${z.punti ? z.punti.length : 0} punti · ${Object.keys(z.attivita || {}).length} attività · ${np} prospect</div></a>`; }).join('') || '<div class="vuoto">Nessuna zona.</div>'}</div>
+    <div class="sub">«${esc(z.meta.keyword)}» · ${z.punti ? z.punti.length : 0} punti · ${Object.keys(z.attivita || {}).length} attività · ${np} prospect</div>${np ? lavoroZona(z) : ''}</a>`; }).join('') || '<div class="vuoto">Nessuna zona.</div>'}</div>
   <div id="richieste"></div>`;
 }
 function apriZona(zid) {
@@ -1227,7 +1269,7 @@ function vAltro() {
   <div class="due"><label class="f">Telefono<input data-fi="telefono" value="${esc(fi.telefono || '+39 351 894 2667')}"></label><label class="f">Email<input data-fi="email" value="${esc(fi.email || 'hector.rinaldi@italiaonline.it')}"></label></div>
   <div class="eb">Dati</div>
   <div class="row"><button class="btn" id="bkp">Scarica backup completo</button><button class="btn" id="csvAll">Esporta CSV (Excel)</button><button class="btn" id="aggiorna">Riscarica da GitHub</button></div>
-  <p class="sub mt">Versione v${VERSIONE}. I dati restano nel repository privato e in questo dispositivo; il token è salvato solo qui. Su un telefono perso: revoca il token da GitHub → Settings → Developer settings.</p>
+  <p class="sub mt"><span class="amb amb-${AMBIENTE}">${AMB_NOME}</span> Versione v${VERSIONE} · dati ${esc((c.owner || '…') + '/' + (c.repo || '…'))}. I dati restano nel repository privato e in questo dispositivo; il token è salvato solo qui. Su un telefono perso: revoca il token da GitHub → Settings → Developer settings.</p>
   <button class="btn mini" id="esci" style="color:var(--neg)">Scollega e cancella i dati da questo dispositivo</button>`;
 }
 async function preparaRepo(out) {
@@ -1319,7 +1361,7 @@ function legaVista(v) {
   if (v === 'altro') {
     $('#cSalva').onclick = async () => {
       ST.cfg = { owner: $('#cOwner').value.trim(), repo: $('#cRepo').value.trim(), token: $('#cTok').value.trim() };
-      await DB.set('cfg', ST.cfg); try { localStorage.setItem('vl-cfg', JSON.stringify(ST.cfg)); } catch (e) { /* copia di riserva non disponibile */ } const out = $('#cEsito');
+      await DB.set('cfg', ST.cfg); try { localStorage.setItem(CHIAVE_CFG, JSON.stringify(ST.cfg)); } catch (e) { /* copia di riserva non disponibile */ } const out = $('#cEsito');
       try { const r = await fetch(`https://api.github.com/repos/${ST.cfg.owner}/${ST.cfg.repo}`, { cache: 'no-store', headers: { Authorization: `Bearer ${ST.cfg.token}` } });
         if (!r.ok) throw new Error(r.status === 404 ? 'Repository non trovato o token senza accesso' : r.status === 401 ? 'Token non valido' : 'GitHub ' + r.status);
         const j = await r.json(); out.innerHTML = `<span class="c-top">Collegato a ${esc(j.full_name)}</span>${j.private ? '' : ' <span class="c-neg">ATTENZIONE: il repository è pubblico. Rendilo privato.</span>'}`; scarica();
@@ -1336,7 +1378,7 @@ function legaVista(v) {
     $('#esci').onclick = async () => {
       if (Object.values(ST.zone).some((s) => s.dirty) && !confirm('Ci sono modifiche non ancora salvate su GitHub. Cancellare comunque?')) return;
       if (!confirm('Cancellare token e dati da questo dispositivo? Il repository GitHub non viene toccato.')) return;
-      for (const k of await DB.keys()) await DB.del(k); try { localStorage.removeItem('vl-cfg'); } catch (e) { /* */ } location.reload();
+      for (const k of await DB.keys()) await DB.del(k); try { localStorage.removeItem(CHIAVE_CFG); } catch (e) { /* */ } location.reload();
     };
   }
 }
@@ -1384,9 +1426,9 @@ document.addEventListener('focusout', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.t
 (async function avvio() {
   ST.cfg = (await DB.get('cfg')) || {};
   // copia di riserva del collegamento: se l'archivio del telefono non risponde, i dati si riscaricano da GitHub
-  let riserva = null; try { riserva = JSON.parse(localStorage.getItem('vl-cfg') || 'null'); } catch (e) { /* */ }
+  let riserva = null; try { riserva = JSON.parse(localStorage.getItem(CHIAVE_CFG) || 'null'); } catch (e) { /* */ }
   if (!ST.cfg.token && riserva && riserva.token) ST.cfg = riserva;
-  else if (ST.cfg.token) { try { localStorage.setItem('vl-cfg', JSON.stringify(ST.cfg)); } catch (e) { /* */ } }
+  else if (ST.cfg.token) { try { localStorage.setItem(CHIAVE_CFG, JSON.stringify(ST.cfg)); } catch (e) { /* */ } }
   ST.conf = (await DB.get('conf')) || { firma: {} };
   for (const k of await DB.keys()) if (String(k).startsWith('zona:')) ST.zone[k.slice(5)] = await DB.get(k);
   statoSync(GH.ok() ? 'att' : 'loc', GH.ok() ? 'Avvio…' : 'Solo su questo dispositivo');
