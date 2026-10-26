@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.23.0';
+const VERSIONE = '0.24.0';
 /* versione in fondo allo splash di avvio, senza la «v» (che compare solo nel Profilo) */
 /* ambiente: lo decide l'indirizzo dell'app (…/visibilita-locale-stage/ è stage, il resto è produzione) */
 const AMBIENTE = /-stage\//.test(location.pathname) ? 'stage' : 'prod';
@@ -80,7 +80,7 @@ const ESITO_AZIONE = { 'Nessuna risposta': ['Richiamare', 1], 'Chiuso': ['Ripass
   'Proposta inviata': ['Sentire per la decisione sulla proposta', 4], 'Obiezione': ["Rispondere all'obiezione", 2] };
 const PRIORITA = ['1 Caldo', '2 Tiepido', '0 Invisibile', '3 Rete'];   // ordine di lavoro: prima i caldi
 const PRODOTTI = ['GBP SEO', 'SEO locale', 'AI SEO', 'InRete', 'Scheda PagineGialle', 'PgCasa', 'TuttoCittà', 'Display', 'Pacchetto misto'];
-const RETI = /tecnocasa|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
+const RETI = /tecnocasa|tecnorete|tempoagency|gabetti|tempocasa|re\/?max|engel|century ?21|grimaldi|coldwell|toscano|professionecasa|frimm|soloaffitti|fondocasa|affiliato|franchising/i;
 const MOTORE = ['motore/report.py', 'motore/foglio.py', 'motore/importa.py', 'motore/siti.py', 'motore/requirements.txt', 'motore/salva.sh', 'motore/esegui_import.sh', 'motore/esegui_report.sh', 'motore/esegui_siti.sh',
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
