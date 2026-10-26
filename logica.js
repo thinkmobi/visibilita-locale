@@ -105,8 +105,8 @@
     const lu = luogo(z, p);
     const dv = L.tondo(vicino.d);
     const a_dist = dv < 30 ? lu[2] : `A ${dv} metri ${lu[0]}`;
-    // solo le prime 3 posizioni contano: fuori = punti in cui non è tra le prime 3; l'assenza è 100 meno la presenza arrotondata per eccesso
-    const fuori = m.N - m.top3, pf = 100 - Math.ceil(m.top3 / m.N * 100);
+    // solo le prime 3 posizioni contano: fuori = punti in cui non è tra le prime 3; l'assenza è 100 meno la presenza arrotondata
+    const fuori = m.N - m.top3, pf = 100 - Math.round(m.top3 / m.N * 100);
     const sopra = righe.filter((r) => !r[3] && r[0] && (!pt.rank || r[0] < pt.rank));
     const deboli = sopra.filter((r) => parseInt(r[2], 10) < (a.rv || 0));
     let titolo, cosa;
@@ -131,7 +131,7 @@
     const a = z.attivita[p.pid] || {};
     const r = p.report || {};
     const b = L.bozza(z, p);
-    const pc = (n) => Math.ceil(n / m.N * 100);   // arrotondamento per eccesso, come nei deck
+    const pc = (n) => Math.round(n / m.N * 100);
     const [la, lo] = L.coord(z, p);
     return {
       name: L.nomeBreve(z, p.pid) || p.nome, pid: p.pid, lat: la, lng: lo, date: z.meta.data_testo,

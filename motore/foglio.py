@@ -221,8 +221,9 @@ def pagina(c, job, f, bg, firma):
         rr = 9.4 * mm
         ring(c, x + rr, cy, rr - 1.6 * mm, rk, 3.2 * mm)
         tx = x + 2 * rr + 4 * mm
-        c.setFillColor(INK); c.setFont("C", 20); c.drawString(tx, cy + .6 * mm, f"{m['top3']} {'zona' if m['top3'] == 1 else 'zone'} su {m['N']}")
-        c.setFillColor(MUTE); c.setFont("P", 9.6); c.drawString(tx, cy - 4.4 * mm, "tra i primi 3 risultati")
+        # etichetta sopra il numero, come nella scheda dell'app
+        c.setFillColor(MUTE); c.setFont("P", 9.6); c.drawString(tx, cy + 2.6 * mm, "tra i primi 3 risultati")
+        c.setFillColor(INK); c.setFont("C", 20); c.drawString(tx, cy - 4.6 * mm, f"{m['top3']} {'zona' if m['top3'] == 1 else 'zone'} su {m['N']}")
     def testata(x, lab, sub, w):
         spaced(c, x, y - 3 * mm, lab, "MOB", 8.6, INK, .1)
         c.setFillColor(MUTE); c.setFont("P", 8.2); c.drawString(x, y - 7 * mm, sub)
