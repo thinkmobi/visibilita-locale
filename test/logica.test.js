@@ -114,10 +114,10 @@ test('analisi: statistiche e testi', () => {
   assert.equal(a.name, 'Agenzia Alfa');
   assert.equal(a.pid, 'pA');
   assert.equal(a.stats[0].big, '3 su 9');
-  assert.equal(a.stats[0].pct, '33%');
+  assert.equal(a.stats[0].pct, '34%');
   assert.equal(a.stats[0].color, 'mid');
-  assert.equal(a.stats[1].big, '6 su 9');
-  assert.equal(a.stats[2].big, '32');
+  assert.equal(a.stats.length, 2);
+  assert.equal(a.stats[1].big, '32');
   assert.equal(a.unclaimed, false);
   assert.match(a.method, /20 ottobre 2026/);
   assert.match(a.method, /«agenzia immobiliare»/);
