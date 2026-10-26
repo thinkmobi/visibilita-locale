@@ -523,8 +523,7 @@ function sezioneAI(z, p) {
   if (!p.pid || !z.attivita[p.pid] || !L.haAI(z)) return '';
   const a = L.metricheAI(z, p.pid), pc = (n) => Math.round(n / a.N * 100);
   return `<div class="eb">Google AI Mode · «${esc(z.meta.keyword)}»</div>
-  <div class="stat"><div><b class="c-${L.colorePct(pc(a.top3))}">${a.top3}/${a.N}</b><span>tra le prime 3</span></div>
-  <div><b class="c-${L.colorePct(pc(a.top20))}">${a.top20}/${a.N}</b><span>presente</span></div></div>
+  <div class="stat"><div><b class="c-${L.colorePct(pc(a.top3))}">${a.top3}/${a.N}</b><span>tra le prime 3 · ${Math.ceil(a.top3 / a.N * 100)}%</span></div></div>
   <div class="mt">${minigriglia(z, p.pid, { ai: true })}</div>`;
 }
 function apriProspect(zid, id, opz = {}) {
@@ -563,8 +562,7 @@ function apriProspect(zid, id, opz = {}) {
     <div class="scelte">${[0, 1, 3, 7].map((n) => `<button class="chip" data-quando="${n}">${n === 0 ? 'Oggi' : n === 1 ? 'Domani' : '+' + n + ' gg'}</button>`).join('')}</div>
   </div>
   ${m ? `<div class="eb">Google Maps · «${esc(z.meta.keyword)}»</div>
-  <div class="stat"><div><b class="c-${L.colorePct(Math.round(m.top3 / m.N * 100))}">${m.top3}/${m.N}</b><span>tra le prime 3</span></div>
-  <div><b class="c-${L.colorePct(Math.round(m.top20 / m.N * 100))}">${m.top20}/${m.N}</b><span>presente</span></div>
+  <div class="stat"><div><b class="c-${L.colorePct(Math.round(m.top3 / m.N * 100))}">${m.top3}/${m.N}</b><span>tra le prime 3 · ${Math.ceil(m.top3 / m.N * 100)}%</span></div>
   <div><b>${a.rv ?? '—'}</b><span>recensioni ${L.virgola(a.r)}</span></div></div>
   <div class="mt">${minigriglia(z, p.pid)}</div>
   ${sezioneAI(z, p)}
