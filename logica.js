@@ -18,7 +18,8 @@
   L.LUOGHI = Object.keys(LUOGO);
   L.ordinale = (n) => ORD[n - 1] || n + '°';
   /* posizioni sempre in cifre: "al 6° posto", "all'8° posto"; breve: "al 6°" */
-  const art = (n) => ([8, 11, 18].includes(n) || String(n).startsWith('8') ? "all'" : 'al ');
+  // «all'» solo davanti a numeri letti con vocale iniziale: 8° (ottavo), 11° (undicesimo), 80°-89°; per il resto «al» (al 18° posto)
+  const art = (n) => (n === 11 || String(n).startsWith('8') ? "all'" : 'al ');
   L.alPostoBreve = (n) => `${art(n)}${n}°`;
   L.alPosto = (n) => `${L.alPostoBreve(n)} posto`;
   L.virgola = (x, d = 1) => (x == null ? '' : Number(x).toFixed(d).replace('.', ','));
@@ -154,7 +155,9 @@
   L.nomeFile = (z, data) => {
     const d = (data || new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date())).replace(/-/g, '').slice(2);
     const q = (z.meta.quartiere || '').replace(/[^\p{L}\p{N}]+/gu, '');
-    return `${d}-${z.meta.categoria || 'Analisi'}-${q}`;
+    // categoria scritta a mano con spazi («Negozi di capsule e cialde») → NegoziDiCapsuleECialde, come le altre
+    const cat = (z.meta.categoria || 'Analisi').split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join('');
+    return `${d}-${cat}-${q}`;
   };
 
   /* contenuto di zone/<id>/stampa.json: tutto ciò che serve al motore, nell'ordine del giro */
@@ -192,7 +195,7 @@
       keyword: z.meta.keyword, frase_kw: z.meta.frase_kw, centrata: z.meta.centrata, lato: z.meta.lato, data_testo: z.meta.data_testo,
       sfondo: z.meta.sfondo || null,
       firma: opz.firma || null,
-      punti: z.punti, punti_ai: z.punti_ai || null,
+      punti: z.punti, punti_ai: L.haAI(z) ? z.punti_ai : null,   // griglia AI solo se allineata ai punti Maps
       fogli,
     };
   };
