@@ -173,3 +173,12 @@ test('jobFogli: tipo, nome file per una o più attività, griglia AI', () => {
   assert.equal(due.fogli.length, 2);
   assert.equal(due.punti_ai.length, z.punti.length);
 });
+
+test('L.pct: X,5 per difetto, oltre per eccesso', () => {
+  assert.equal(L.pct(1, 2), 50);
+  assert.equal(L.pct(29, 200), 14);   // 14,5 → 14
+  assert.equal(L.pct(117, 800), 15);  // 14,625 → 15
+  assert.equal(L.pct(7, 49), 14);     // 14,29 → 14
+  assert.equal(L.pct(3, 49), 6);      // 6,12 → 6
+  assert.equal(L.pct(0, 49), 0); assert.equal(L.pct(49, 49), 100); assert.equal(L.pct(1, 0), 0);
+});

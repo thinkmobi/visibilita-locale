@@ -521,7 +521,7 @@ function minigriglia(z, pid, opz = {}) {
 /* scheda cliente: Google AI Mode sulla stessa griglia, con le zone perse rispetto a Maps */
 function sezioneAI(z, p) {
   if (!p.pid || !z.attivita[p.pid] || !L.haAI(z)) return '';
-  const a = L.metricheAI(z, p.pid), pc = (n) => Math.round(n / a.N * 100);
+  const a = L.metricheAI(z, p.pid), pc = (n) => L.pct(n, a.N);
   return `<div class="eb">Google AI Mode · «${esc(z.meta.keyword)}»</div>
   <div class="stat"><div><span>tra le prime 3</span><b class="c-${L.colorePct(pc(a.top3))}">${a.top3}/${a.N}<small>${pc(a.top3)}%</small></b></div></div>
   <div class="mt">${minigriglia(z, p.pid, { ai: true })}</div>`;
@@ -562,7 +562,7 @@ function apriProspect(zid, id, opz = {}) {
     <div class="scelte">${[0, 1, 3, 7].map((n) => `<button class="chip" data-quando="${n}">${n === 0 ? 'Oggi' : n === 1 ? 'Domani' : '+' + n + ' gg'}</button>`).join('')}</div>
   </div>
   ${m ? `<div class="eb">Google Maps · «${esc(z.meta.keyword)}»</div>
-  <div class="stat"><div><span>tra le prime 3</span><b class="c-${L.colorePct(Math.round(m.top3 / m.N * 100))}">${m.top3}/${m.N}<small>${Math.round(m.top3 / m.N * 100)}%</small></b></div>
+  <div class="stat"><div><span>tra le prime 3</span><b class="c-${L.colorePct(L.pct(m.top3, m.N))}">${m.top3}/${m.N}<small>${L.pct(m.top3, m.N)}%</small></b></div>
   <div><span>recensioni ${L.virgola(a.r)}</span><b>${a.rv ?? '—'}</b></div></div>
   <div class="mt">${minigriglia(z, p.pid)}</div>
   ${sezioneAI(z, p)}
@@ -1171,7 +1171,7 @@ function vCruscotto() {
     <button><b>${regs.filter((r) => r.data >= sett).length}</b><span>Contatti ultimi 7 gg</span></button>
     <button><b>${regs.filter((r) => esitiDi(r).includes('Appuntamento fissato')).length}</b><span>Appuntamenti fissati</span></button>
     <button><b class="c-top">${vinti.length}</b><span>Vinti</span></button>
-    <button><b>${vinti.length + persi.length ? Math.round(vinti.length / (vinti.length + persi.length) * 100) + '%' : '—'}</b><span>Tasso di chiusura</span></button>
+    <button><b>${vinti.length + persi.length ? L.pct(vinti.length, vinti.length + persi.length) + '%' : '—'}</b><span>Tasso di chiusura</span></button>
     <button><b>${eur(vinti.reduce((s, x) => s + (+x.p.valore || 0), 0))}</b><span>Valore firmato</span></button>
     <button><b>${eur(tt.filter((x) => aperto(x.p)).reduce((s, x) => s + (+x.p.valore || 0), 0))}</b><span>Valore in proposta</span></button></div>
   <div class="eb">Imbuto per stato</div>

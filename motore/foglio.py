@@ -31,8 +31,8 @@ def heat(r):
 
 
 def su(n):
-    """numeri mostrati: interi arrotondati al più vicino (0,5 per eccesso)"""
-    return max(0, math.floor(n + .5 + 1e-9))
+    """numeri mostrati: X,5 per difetto, oltre X,5 per eccesso (regola di Hector, 26/10/2026)"""
+    return max(0, math.ceil(n - .5 - 1e-9))
 
 
 def pc(a, b):

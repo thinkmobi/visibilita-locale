@@ -66,6 +66,8 @@
     return ord[0];
   };
 
+  /* percentuali mostrate: X,5 per difetto, oltre X,5 per eccesso (regola di Hector, 26/10/2026) */
+  L.pct = (n, N) => (N ? Math.max(0, Math.ceil(n / N * 100 - 0.5 - 1e-9)) : 0);
   L.colorePct = (x) => (x >= 50 ? 'top' : x >= 25 ? 'mid' : 'low');
   L.recStr = (a) => `${a.rv ?? 0} rec. · ${L.virgola(a.r)}`;
   L.nomeBreve = (z, pid) => { const a = z.attivita[pid] || {}; return a.b || a.n || ''; };
@@ -106,7 +108,7 @@
     const dv = L.tondo(vicino.d);
     const a_dist = dv < 30 ? lu[2] : `A ${dv} metri ${lu[0]}`;
     // solo le prime 3 posizioni contano: fuori = punti in cui non è tra le prime 3; l'assenza è 100 meno la presenza arrotondata
-    const fuori = m.N - m.top3, pf = 100 - Math.round(m.top3 / m.N * 100);
+    const fuori = m.N - m.top3, pf = 100 - L.pct(m.top3, m.N);
     const sopra = righe.filter((r) => !r[3] && r[0] && (!pt.rank || r[0] < pt.rank));
     const deboli = sopra.filter((r) => parseInt(r[2], 10) < (a.rv || 0));
     let titolo, cosa;
@@ -131,7 +133,7 @@
     const a = z.attivita[p.pid] || {};
     const r = p.report || {};
     const b = L.bozza(z, p);
-    const pc = (n) => Math.round(n / m.N * 100);
+    const pc = (n) => L.pct(n, m.N);
     const [la, lo] = L.coord(z, p);
     return {
       name: L.nomeBreve(z, p.pid) || p.nome, pid: p.pid, lat: la, lng: lo, date: z.meta.data_testo,
