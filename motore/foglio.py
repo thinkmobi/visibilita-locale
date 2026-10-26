@@ -77,6 +77,16 @@ def presenza(dentro, N, chi):
     return (pc(dentro, N), testo, "Finché la situazione resta questa, quelle ricerche vanno agli altri.")
 
 
+def presenza_doppia(b, a, N):
+    """riquadro rosa con AI Mode e Maps: le due quote di zone tra i primi 3, nello stesso ordine delle mappe"""
+    fuori = (b < N) or (a < N)
+    testo = "delle zone in cui Google vi mostra tra i primi 3 risultati."
+    if fuori:
+        testo += (" Nelle altre" if (a or b) else " Ovunque") + " chi cerca vede prima i vostri concorrenti e chiama loro."
+    return {"voci": [(pc(b, N), "Google AI Mode"), (pc(a, N), "Google Maps")], "testo": testo,
+            "chiusa": "Finché la situazione resta questa, quelle ricerche vanno agli altri." if fuori else ""}
+
+
 def testi(job, f, mm_, ma, debole):
     """testi del foglio: generati dai numeri e dalla frase della zona, uguali per ogni settore.
     debole = "ai" o "maps": il titolo parla della piattaforma in cui l'attività è più indietro"""
@@ -101,16 +111,16 @@ def testi(job, f, mm_, ma, debole):
     altrove = "Su Google Maps" if debole == "ai" else "Su Google AI Mode"
     # il titolo parte dalla piattaforma più debole e cita sempre anche l'altra
     if fuori and fuori == altro_fuori:
-        titolo = f"Su Google Maps e su Google AI Mode, in {rosso(f'{zone(fuori)} su {N}')} chi cerca {chi} trova prima i vostri concorrenti"
+        titolo = f"Su Google AI Mode e su Google Maps, in {rosso(f'{zone(fuori)} su {N}')} chi cerca {chi} trova prima i vostri concorrenti"
     elif fuori:
         titolo = f"{dove}, in {rosso(f'{zone(fuori)} su {N}')} chi cerca {chi} trova prima i vostri concorrenti. "
         titolo += f"{altrove} succede in {rosso(f'{zone(altro_fuori)} su {N}')}." if altro_fuori else f"{altrove} siete tra i primi 3 ovunque."
     else:
-        titolo = f"Su Google Maps e su Google AI Mode siete tra i primi 3 in <font color='#1E8E3E'>tutte le {N} zone</font>"
-    sub = f"Tra i primi 3: su Google Maps in {a} zone su {N} ({pc(a, N)}), su Google AI Mode in {b} ({pc(b, N)})."
+        titolo = f"Su Google AI Mode e su Google Maps siete tra i primi 3 in <font color='#1E8E3E'>tutte le {N} zone</font>"
+    sub = f"Tra i primi 3: su Google AI Mode in {b} zone su {N} ({pc(b, N)}), su Google Maps in {a} ({pc(a, N)})."
     lettura = "Ogni pallino è una zona: il numero è la vostra posizione su Google da quel punto. Il quadratino nero è la vostra sede."
     # quota di zone tra i primi 3 sulla piattaforma debole: si vede subito quanto poco compare
-    rischio = presenza(dentro, N, "Google AI Mode" if debole == "ai" else "Google Maps")
+    rischio = presenza_doppia(b, a, N)
     invito = ("Prossimo passo", "Vi mostro l’analisi completa",
               "In un incontro guardiamo zona per zona chi vi passa davanti e parliamo delle azioni correttive per migliorare il vostro posizionamento nel tempo.")
     return {"titolo": titolo, "sub": sub, "lettura": lettura, "rischio": rischio, "fuori": fuori, "invito": invito, "dove": dove}
@@ -222,7 +232,7 @@ def pagina(c, job, f, bg, firma):
     # --- due mappe a sinistra, colonna dei messaggi a destra
     gap, gcol = 7 * mm, 8.5 * mm
     avail = y - bottom
-    head_h, stat_h = 9.5 * mm, 19 * mm
+    head_h, stat_h = 12 * mm, 19 * mm
     S = min(80 * mm, avail - head_h - stat_h)
     xm = ML
     sede = (f.get("lat"), f.get("lng"))
@@ -233,14 +243,25 @@ def pagina(c, job, f, bg, firma):
         # etichetta sopra il numero, come nella scheda dell'app
         c.setFillColor(MUTE); c.setFont("P", 9.6); c.drawString(tx, cy + 2.6 * mm, "tra i primi 3 risultati")
         c.setFillColor(INK); c.setFont("C", 20); c.drawString(tx, cy - 4.6 * mm, f"{m['top3']} {'zona' if m['top3'] == 1 else 'zone'} su {m['N']}")
+    def icona(lab, x, yb, h, col):
+        """simbolo della piattaforma: scintilla per AI Mode, segnaposto per Maps (riconoscibili anche in bianco e nero)"""
+        c.setFillColor(col)
+        if "AI" in lab:
+            c.setFont("DJ", h * 1.25); c.drawString(x, yb, "✦"); return h * 1.05
+        r = h * .36; cx = x + r; cy = yb + h * .62
+        pth = c.beginPath(); pth.moveTo(cx - r * .82, cy - r * .55); pth.lineTo(cx, yb - h * .05); pth.lineTo(cx + r * .82, cy - r * .55); pth.close()
+        c.drawPath(pth, stroke=0, fill=1); c.circle(cx, cy, r, stroke=0, fill=1)
+        c.setFillColor(white); c.circle(cx, cy, r * .42, stroke=0, fill=1); return 2 * r + h * .2
     def testata(x, lab, sub, w):
-        spaced(c, x, y - 3 * mm, lab, "MOB", 8.6, INK, .1)
-        c.setFillColor(MUTE); c.setFont("P", 8.2); c.drawString(x, y - 7 * mm, sub)
+        # simbolo e nome grande della piattaforma, descrizione sotto
+        dx = icona(lab, x, y - 5.6 * mm, 4.6 * mm, INK)
+        c.setFillColor(INK); c.setFont("C", 16); c.drawString(x + dx + 1.6 * mm, y - 5.4 * mm, lab)
+        c.setFillColor(MUTE); c.setFont("P", 8.2); c.drawString(x, y - 9.6 * mm, sub)
         c.setStrokeColor(LINE); c.setLineWidth(.5); c.line(x, y - head_h + .6 * mm, x + w, y - head_h + .6 * mm)
     if pai:
         for i, (lab, sub, pts, rk, m) in enumerate([
-                ("Google Maps", "la mappa di Google", punti, rkm, mm_),
-                ("Google AI Mode", "le risposte dell’intelligenza artificiale", pai, rka, ma)]):
+                ("Google AI Mode", "le risposte dell’intelligenza artificiale", pai, rka, ma),
+                ("Google Maps", "la mappa di Google", punti, rkm, mm_)]):   # prima AI Mode, poi Maps
             x = xm + i * (S + gap)
             testata(x, lab, sub, S)
             my = y - head_h - 1.6 * mm - S
@@ -253,22 +274,45 @@ def pagina(c, job, f, bg, firma):
         testata(xm, "Google Maps", "la mappa di Google", largo)
         my = y - head_h - 1.6 * mm - S1
         mappa(c, xm, my, S1, punti, rkm, bg, sede)
-        numeri(xm + S1 + 6 * mm, my + S1 / 2, rkm, mm_)
+        # anello grande sopra la scritta, centrati nello spazio tra la mappa e la colonna destra
+        x0, x1 = xm + S1 + 4 * mm, xm + 2 * S + gap + gcol - 4 * mm
+        cx = (x0 + x1) / 2; rr = min((x1 - x0) / 2 - 2 * mm, 21 * mm)
+        frase = f"{mm_['top3']} {'zona' if mm_['top3'] == 1 else 'zone'} su {mm_['N']}"
+        fs = 26
+        while fs > 16 and c.stringWidth(frase, "C", fs) > x1 - x0: fs -= 1
+        hblk = 2 * rr + 6 * mm + 4 * mm + fs * .36 * mm
+        top = my + S1 / 2 + hblk / 2
+        ring(c, cx, top - rr, rr - rr * .17, rkm, rr * .34)
+        c.setFillColor(MUTE); c.setFont("P", 10.4); c.drawCentredString(cx, top - 2 * rr - 6 * mm, "tra i primi 3 risultati")
+        c.setFillColor(INK); c.setFont("C", fs); c.drawCentredString(cx, top - hblk, frase)
     sx = xm + 2 * S + gap + gcol; sw = W - MR - sx
-    # riquadro rosa: quanto vi vede chi cerca (presenza tra i primi 3 sulla piattaforma debole)
-    big, rt, chiusa = T["rischio"]
+    # riquadro rosa: quanto vi vede chi cerca (presenza tra i primi 3: AI Mode e Maps, oppure solo Maps)
+    doppio = isinstance(T["rischio"], dict)
+    if doppio: voci, rt, chiusa = T["rischio"]["voci"], T["rischio"]["testo"], T["rischio"]["chiusa"]
+    else: big, rt, chiusa = T["rischio"]
     inner = sw - 9 * mm
-    p1 = P(esc(rt), "P", 10.4, 13.4, NEGTX); _, h1 = p1.wrap(inner, 100 * mm)
+    p1 = P(esc(rt), "P", 9.8 if doppio else 10.4, 12.4 if doppio else 13.4, NEGTX); _, h1 = p1.wrap(inner, 100 * mm)
     p2 = P(f"<b>{esc(chiusa)}</b>", "P", 9.6, 12.4, NEGTX) if chiusa else None; _, h2 = p2.wrap(inner, 100 * mm) if p2 else (0, -4 * mm)
-    hb = 6 * mm + 4 * mm + 15 * mm + h1 + 4 * mm + h2 + 5 * mm
+    hb = 6 * mm + 4 * mm + (20.5 if doppio else 15) * mm + h1 + 4 * mm + h2 + 5 * mm
     yb = y - hb
     c.setFillColor(NEGBG); c.roundRect(sx, yb, sw, hb, 1.6 * mm, stroke=0, fill=1)
     c.setFillColor(NEGBR); c.rect(sx, yb, 1.3 * mm, hb, stroke=0, fill=1)
     ix = sx + 5.5 * mm; iy = y - 6 * mm
     spaced(c, ix, iy - 1 * mm, "Quanto vi vede chi cerca", "MOB", 8.4, NEGTX, .12)
-    iy -= 4 * mm + 13 * mm
-    c.setFillColor(NEGBR); c.setFont("C", 40); c.drawString(ix, iy, str(big))
-    iy -= 4 * mm
+    if doppio:
+        # due numeri affiancati, prima AI Mode e poi Maps come le mappe
+        iy -= 4 * mm + 11 * mm; cw = inner / 2
+        for k, (val, lab) in enumerate(voci):
+            # simbolo e nome sopra il numero, come le testate delle mappe
+            xx = ix + k * cw
+            dx = icona(lab, xx, iy + 3.6 * mm, 3.6 * mm, NEGTX)
+            c.setFillColor(NEGTX); c.setFont("C", 12); c.drawString(xx + dx + 1.2 * mm, iy + 3.8 * mm, lab)
+            c.setFillColor(NEGBR); c.setFont("C", 27); c.drawString(xx, iy - 6 * mm, str(val))
+        iy -= 10.5 * mm
+    else:
+        iy -= 4 * mm + 13 * mm
+        c.setFillColor(NEGBR); c.setFont("C", 40); c.drawString(ix, iy, str(big))
+        iy -= 4 * mm
     p1.drawOn(c, ix, iy - h1); iy -= h1 + 2 * mm
     if p2:
         c.setStrokeColor(HexColor("#E9B9B4")); c.setLineWidth(.5); c.line(ix, iy, sx + sw - 4 * mm, iy); iy -= 2 * mm
