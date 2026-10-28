@@ -289,6 +289,29 @@ test('8d. elenco attività della zona: indicatori dei prospect (priorità, top 3
   } finally { await t.chiudi(); }
 });
 
+test('8f. scheda zona: «Ultimo PDF» verde chiaro con ✓ se il PDF esiste, normale se manca', async () => {
+  const sfondo = (page) => page.$eval('#zPdf', (b) => getComputedStyle(b).backgroundColor);
+  const t = await apri({ vista: 'zone' });
+  try {
+    await attendiStato(t.page, /Aggiornato/);
+    await t.page.evaluate((id) => { location.hash = '#z/' + id; }, ID);
+    await t.page.waitForSelector('#zPdf'); await t.page.waitForTimeout(400);
+    assert.equal((await t.page.textContent('#zPdf')).trim(), 'Ultimo PDF');
+    assert.equal(await sfondo(t.page), 'rgb(255, 255, 255)');
+    if (process.env.SCREEN) await t.page.waitForTimeout(1700), await t.page.screenshot({ path: process.env.SCREEN + '/zona-senza-pdf.png' });
+  } finally { await t.chiudi(); }
+  const t2 = await apri({ vista: 'zone', mutaGh: (gh) => gh.metti(`zone/${ID}/stampa/esito.json`, { file: 'stampa/prova.pdf', richiesta: 'r1', analisi: 2, fogli: 1, avvisi: [] }) });
+  try {
+    await attendiStato(t2.page, /Aggiornato/);
+    await t2.page.evaluate((id) => { location.hash = '#z/' + id; }, ID);
+    await t2.page.waitForSelector('#zPdf.pdf-pronto');
+    assert.equal((await t2.page.textContent('#zPdf')).trim(), '✓ Ultimo PDF');
+    assert.equal(await sfondo(t2.page), 'rgb(230, 244, 234)');
+    if (process.env.SCREEN) await t2.page.waitForTimeout(1700), await t2.page.screenshot({ path: process.env.SCREEN + '/zona-con-pdf.png' });
+    assert.deepEqual(t2.errori, []);
+  } finally { await t2.chiudi(); }
+});
+
 test('8e. liste: barre del posizionamento con la quota di zone tra i primi 3 (Maps; AI Mode sopra quando c’è)', async () => {
   const t = await apri({ vista: 'prospect' });
   try {

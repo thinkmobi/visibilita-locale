@@ -282,3 +282,6 @@ html[data-amb="stage"] .top{border-bottom:3px solid #F29529}
 .pos-t{height:7px;border-radius:4px;background:#E6E9E7;overflow:hidden}.pos-t i{display:block;height:100%;border-radius:4px}
 .pos-t i.pos-top{background:var(--g2)}.pos-t i.pos-mid{background:var(--y)}.pos-t i.pos-low{background:var(--r1)}
 .pos-r b{font-family:PlexCond;font-size:14px;text-align:right}
+
+/* «Ultimo PDF» quando il PDF della zona esiste già: verde chiaro della palette, segno ✓ per chi non distingue i colori */
+.btn.mini.pdf-pronto{background-color:#E6F4EA;border-color:#34A853;color:#1E8E3E;font-weight:600}

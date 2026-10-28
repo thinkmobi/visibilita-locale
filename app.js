@@ -1,7 +1,7 @@
 /* Visibilità locale: gestione prospect, giro e stampe. Dati in un repository GitHub privato,
    copia locale in IndexedDB per lavorare offline. Nessun dato vive nel repository dell'app. */
 'use strict';
-const VERSIONE = '0.31.1';
+const VERSIONE = '0.32.0';
 /* versione in fondo allo splash di avvio, senza la «v» (che compare solo nel Profilo) */
 /* ambiente: lo decide l'indirizzo dell'app (…/visibilita-locale-stage/ è stage, il resto è produzione) */
 const AMBIENTE = /-stage\//.test(location.pathname) ? 'stage' : 'prod';
@@ -85,7 +85,7 @@ const MOTORE = ['motore/report.py', 'motore/foglio.py', 'motore/importa.py', 'mo
   ...['PlexCond-Bold', 'PlexCond-SemiBold', 'PlexMono-Bold', 'PlexMono-Medium', 'PlexMono-Regular', 'PlexSans-Bold', 'PlexSans-Medium', 'PlexSans-Regular', 'PlexSans-SemiBold', 'DejaVuSans'].map((f) => `motore/fonts/${f}.ttf`)];
 const WORKFLOW = { 'motore/workflows/report.yml': '.github/workflows/report.yml', 'motore/workflows/importa.yml': '.github/workflows/importa.yml', 'motore/workflows/siti.yml': '.github/workflows/siti.yml' };
 
-const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, fg: { tappa: '', prio: '' }, timer: {}, pdf: {}, pdfMsg: {} };
+const ST = { cfg: {}, zone: {}, conf: { firma: {} }, sync: { stato: 'loc', msg: 'Locale' }, f: { stato: 'aperti', prio: '', zona: '', q: '', kpi: '', pg: '' }, giroData: null, fg: { tappa: '', prio: '' }, timer: {}, pdf: {}, pdfMsg: {}, stampa: {} };
 
 /* ---------- utilità ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -255,6 +255,7 @@ async function scarica() {
       const id = d.name;
       const elenco = await GH.list(`zone/${id}`);
       const file = elenco.find((f) => f.name === 'zona.json');
+      ST.stampa[id] = elenco.some((f) => f.name === 'stampa' && f.type === 'dir');   // cartella dei PDF: dice se l'esito va letto
       if (!file) continue;
       const fs = elenco.find((f) => f.name === 'siti.json');
       if (fs && ST.zone[id] && ST.zone[id].sitiSha !== fs.sha) {
@@ -984,6 +985,7 @@ async function generaPdf(zid, tipo = 'giro') {
       if (e && e.data.richiesta === job.richiesta) {
         if (e.data.errore) { out.innerHTML = `<span class="c-neg">${esc(e.data.errore)}</span>`; return; }
         const av = (e.data.avvisi || []).map((a) => `<div class="avviso">${esc(a)}</div>`).join('');
+        ST.zone[zid].pdf = e.data.file; ST.stampa[zid] = true;
         out.innerHTML = `<button class="btn mini ink" data-pdf="${zid}|${esc(e.data.file)}">Apri ${esc(e.data.file.split('/').pop())}</button>${av}`;
         const za = ST.zone[zid].z; if (tipo === 'giro') ps.forEach((p0) => { const p = za.prospect[p0.id]; if (p && !p.report_prodotto) { p.report_prodotto = oggi(); tocca(p, 'report_prodotto'); } }); modificato(zid);
         return;
@@ -1074,7 +1076,7 @@ function apriZona(zid) {
   const f = apriFoglio(`${z.meta.quartiere} · ${z.meta.keyword}`, `
   <div class="sub">Rilevazione del ${esc(z.meta.data_testo)} · griglia ${esc(z.meta.lato)} · ${(z.punti || []).length} punti · ${L.haAI(z) ? 'AI Mode importato' : 'AI Mode assente'}</div>
   <div class="sub mt">${s.siti && s.siti.aggiornato ? `Siti controllati il ${oraRoma(s.siti.aggiornato, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${Object.values(s.siti.siti).filter((v) => STATO_SITO[v.stato]).length} non funzionanti su ${Object.keys(s.siti.siti).length}` : 'Siti non ancora controllati'}</div>
-  <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini" id="zPdf">Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button><button class="btn mini" id="zAI">${L.haAI(z) ? 'Aggiorna AI Mode' : 'Aggiungi AI Mode'}</button></div>
+  <div class="row mt"><button class="btn mini" id="zSiti">Ricontrolla siti</button><button class="btn mini${s.pdf ? ' pdf-pronto' : ''}" id="zPdf">${s.pdf ? '✓ ' : ''}Ultimo PDF</button><button class="btn mini" id="zTesti">Testi della zona</button><button class="btn mini" id="zEsporta">Esporta CSV</button><button class="btn mini" id="zAI">${L.haAI(z) ? 'Aggiorna AI Mode' : 'Aggiungi AI Mode'}</button></div>
   <div class="eb">Attività trovate</div>
   <div class="filtri">${[['top3', L.haAI(z) ? 'Top 3 AI Mode' : 'Top 3'], ['rv', 'Recensioni'], ['nome', 'Nome']].map(([k, l]) => `<button class="chip ${ord === k ? 'on' : ''}" data-ord="${k}">${l}</button>`).join('')}
   <button class="chip ${ST.f.soloNuove ? 'on' : ''}" id="soloNuove">Solo non in lista</button></div>
@@ -1087,6 +1089,12 @@ function apriZona(zid) {
     const id = b.dataset.zgiro, d = dataGiroProposta();
     aggiorna(zid, id, { giro: { data: d, ordine: prossimoOrdine(zid, d), orario: '', fatto: false } }); toast('Aggiunto al giro del ' + gg(d)); apriZona(zid);
   }));
+  // PDF della zona già generato: il pulsante cambia colore (verde chiaro) appena l'esito risulta su GitHub
+  if (ST.stampa[zid] === false) s.pdf = '';
+  if (ST.stampa[zid] && GH.ok() && navigator.onLine) GH.getJSON(`zone/${zid}/stampa/esito.json`).then((e) => {
+    const b = $('#zPdf', f); const c = !!(e && e.data && e.data.file && !e.data.errore);
+    s.pdf = c ? e.data.file : ''; if (b) { b.classList.toggle('pdf-pronto', c); b.textContent = (c ? '✓ ' : '') + 'Ultimo PDF'; }
+  }).catch(() => {});
   $('#zPdf', f).onclick = async () => {
     const w = window.open('', '_blank'); if (w) w.document.write('<p style="font:16px system-ui;padding:24px">Cerco l\'ultimo PDF…</p>');
     try { const e = await GH.getJSON(`zone/${zid}/stampa/esito.json`); if (e && e.data.file) apriPdf(zid, e.data.file, w); else { if (w) w.close(); toast('Nessun PDF ancora'); } } catch (e) { if (w) w.close(); toast(e.message); }
